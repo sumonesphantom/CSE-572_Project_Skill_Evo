@@ -1,0 +1,72 @@
+{
+  "bird": {
+    "n_tasks": 500,
+    "n_databases": 11,
+    "difficulty": {
+      "simple": 148,
+      "moderate": 250,
+      "challenging": 102
+    },
+    "splits": {
+      "train": {
+        "n": 247,
+        "difficulty": {
+          "challenging": 50,
+          "moderate": 124,
+          "simple": 73
+        }
+      },
+      "val": {
+        "n": 98,
+        "difficulty": {
+          "challenging": 19,
+          "moderate": 48,
+          "simple": 31
+        }
+      },
+      "test": {
+        "n": 155,
+        "difficulty": {
+          "challenging": 33,
+          "moderate": 78,
+          "simple": 44
+        }
+      }
+    }
+  },
+  "spider": {
+    "n_tasks": 1032,
+    "n_databases": 20,
+    "difficulty": {
+      "simple": 595,
+      "moderate": 340,
+      "challenging": 97
+    },
+    "splits": {
+      "train": {
+        "n": 309,
+        "difficulty": {
+          "challenging": 29,
+          "moderate": 101,
+          "simple": 179
+        }
+      },
+      "val": {
+        "n": 205,
+        "difficulty": {
+          "challenging": 19,
+          "simple": 118,
+          "moderate": 68
+        }
+      },
+      "test": {
+        "n": 518,
+        "difficulty": {
+          "challenging": 49,
+          "moderate": 171,
+          "simple": 298
+        }
+      }
+    }
+  }
+}

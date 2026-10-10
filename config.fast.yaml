@@ -1,0 +1,47 @@
+# Fast smoke-test profile (~20-30 min): fewer rounds, tasks and probes
+seed: 0
+rounds: 3
+batch_size: 15
+workers: 2             # concurrent solver calls to Ollama
+eval_every: 1          # evaluate test sets every N rounds (val is evaluated every round)
+runs_dir: runs
+
+data:
+  task_files: [data/processed/bird.jsonl, data/processed/spider.jsonl]
+  splits_file: data/processed/splits.json
+  train: bird:train                    # skills evolve from these episodes
+  val: {split: bird:val, max: 40}
+  test:                                # never seen by the evolver or the gate
+    bird_test: {split: bird:test, max: 50}
+    spider_transfer: {split: spider:test, max: 40}
+
+llm:
+  host: http://localhost:11434
+  solver: qwen2.5:7b-instruct          # task agent (weak on purpose: room to improve)
+  evolver: glm-4.7-flash:latest        # writes / edits skills
+  cache: data/cache/llm_cache.sqlite
+  solver_ctx: 8192
+  evolver_ctx: 16384
+
+solver:
+  top_k: 3              # skills retrieved per task
+  min_score: 0.5        # BM25 threshold; below it a skill is not injected
+  repair: true          # one retry with the SQLite error message
+  sql_timeout: 30
+
+evolver:
+  max_ops: 3
+  n_fail: 10            # failed episodes shown to the evolver
+  n_success: 3
+  show_gold: true       # show reference SQL for failed *training* episodes
+
+monitor:
+  probe_relevant: 12
+  probe_random: 8
+  min_net: 2            # |gained - lost| needed to call an edit positive/negative
+  alpha: 0.05           # McNemar significance level (reported)
+  min_uses: 5           # uses before a skill can be called helpful/harmful
+  loo: true             # leave-one-out attribution per skill
+  loo_max_tasks: 8
+  rollback_min_net: 3   # guarded arm: roll back if val drops by >= 3 tasks vs best
+  audit_split: bird_test   # re-test every edit on held-out tasks to audit the monitor

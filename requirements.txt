@@ -1,0 +1,9 @@
+requests
+pyyaml
+numpy
+pandas
+scipy
+streamlit
+plotly
+pytest
+gdown
