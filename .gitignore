@@ -13,3 +13,7 @@ runs/
 *.log
 
 .DS_Store
+
+# fine-tuning artifacts (regenerate with finetune/build_sft.py, mlx_lm.lora)
+finetune/data/
+finetune/adapters/

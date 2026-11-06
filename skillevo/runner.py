@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .data import load_tasks
 from .evolver import Evolver, apply_op, describe_op
-from .llm import LLMCache, OllamaLLM
+from .llm import LLMCache, make_llm
 from .monitor import Monitor
 from .skills import SkillLibrary, text_diff
 from .solver import Solver
@@ -65,8 +65,8 @@ class Experiment:
 
         cache = LLMCache(root / cfg["llm"]["cache"])
         host = cfg["llm"].get("host", "http://localhost:11434")
-        self.solver_llm = solver_llm or OllamaLLM(cfg["llm"]["solver"], host, cache, num_ctx=cfg["llm"].get("solver_ctx", 8192), max_tokens=512)
-        self.evolver_llm = evolver_llm or OllamaLLM(cfg["llm"]["evolver"], host, cache, num_ctx=cfg["llm"].get("evolver_ctx", 16384), max_tokens=2048)
+        self.solver_llm = solver_llm or make_llm(cfg["llm"]["solver"], host, cache, num_ctx=cfg["llm"].get("solver_ctx", 8192), max_tokens=512)
+        self.evolver_llm = evolver_llm or make_llm(cfg["llm"]["evolver"], host, cache, num_ctx=cfg["llm"].get("evolver_ctx", 16384), max_tokens=2048)
         sc = cfg["solver"]
         self.solver = Solver(self.solver_llm, sc.get("top_k", 3), sc.get("min_score", 0.5), sc.get("repair", True), sc.get("sql_timeout", 30))
         ec = cfg["evolver"]
