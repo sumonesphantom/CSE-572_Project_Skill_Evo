@@ -1,0 +1,25 @@
+# QLoRA on Phi-4-mini (MLX 4-bit base). Data dir, adapter path and iters are set by scripts/phi_lora.sh.
+model: mlx-community/Phi-4-mini-instruct-4bit
+train: true
+fine_tune_type: lora
+mask_prompt: true            # loss on the SQL answer only
+num_layers: 16               # LoRA on the last 16 of 32 layers
+batch_size: 2
+grad_accumulation_steps: 4   # effective batch 8
+iters: 400
+learning_rate: 1.0e-4
+lr_schedule:
+  name: cosine_decay
+  warmup: 40
+  arguments: [1.0e-4, 400, 1.0e-6]
+lora_parameters:
+  rank: 16
+  dropout: 0.05
+  scale: 2.0
+max_seq_length: 4096
+grad_checkpoint: true        # trades speed for memory: needed on an 18 GB machine
+steps_per_report: 10
+steps_per_eval: 100
+val_batches: 10
+save_every: 100
+seed: 0

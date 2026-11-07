@@ -16,3 +16,8 @@ runs/
 
 # downloaded dataset archives
 *.zip
+
+# fine-tuning artifacts (rebuilt by scripts/phi_lora.sh)
+finetune/data/
+finetune/adapters/
+data/raw/synsql/

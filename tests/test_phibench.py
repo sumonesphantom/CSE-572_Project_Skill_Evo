@@ -345,3 +345,30 @@ def test_embed_retriever_same_db_first(db):
     assert [d.id for d in pool.top(t, 3, "embed_samedb")][-1] == "a"
     with pytest.raises(ValueError):
         Pool(demos).top(t, 1, "embed_samedb")
+
+
+# ------------------------------------------------------------------ Phase D: SFT data
+from phibench import sft  # noqa: E402
+
+
+def test_sft_build_mixes_dedupes_and_matches_eval_prompt(db):
+    mk = lambda i, q, ds="bird": task(db, i, q, "SELECT COUNT(*) FROM dept", ds)  # noqa: E731
+    tasks = {t.id: t for t in [mk(1, "How many depts?"), mk(2, "Count departments"), mk(3, "Same as val?"),
+                               mk(4, "Same as val?"), mk(5, "spider q", "spider"), mk(6, "spider val q", "spider")]}
+    splits = {"bird": {"train": ["bird-1", "bird-2", "bird-3"], "val": ["bird-4"], "test": []},
+              "spider": {"train": ["spider-5"], "val": ["spider-6"], "test": []}}
+    spider_train = [Task("spider-train-0", "spider", "toy", db, "list depts", "", "SELECT name FROM dept")]
+    train, valid, st = sft.build("d1", tasks, splits, spider_train, bird_repeat=3, counter=lambda e: 10)
+    assert st["dropped_eval_overlap"] == 1                        # bird-3 has the text of val question bird-4
+    assert st["train_bird"] == 2 * 3 and st["train_spider"] == 2 and st["valid"] == 1
+    ex = next(e for e in train if e["id"] == "bird-1")
+    assert ex["messages"][:2] == build_messages(tasks["bird-1"], STRATEGIES["a3_rules"])
+    assert ex["messages"][2] == {"role": "assistant", "content": "```sql\nSELECT COUNT(*) FROM dept\n```"}
+    _, _, st2 = sft.build("d1", tasks, splits, spider_train, counter=lambda e: 5000, max_tokens=4000)
+    assert st2["train"] == 0 and st2["dropped_too_long"] > 0
+    with pytest.raises(ValueError):
+        sft.build("d2", tasks, splits, spider_train)
+    syn = sft.synsql_example({"question": "q?", "schema": "CREATE TABLE t (a INT);", "sql": "SELECT a FROM t", "_row": 7})
+    train3, _, st3 = sft.build("d2", tasks, splits, spider_train, synsql=[syn], counter=lambda e: 10)
+    assert st3["train_synsql"] == 1 and "CREATE TABLE t" in syn["messages"][1]["content"]
+    assert sft.synsql_example({"question": "", "schema": "x", "sql": "y"}) is None
