@@ -18,6 +18,7 @@ Phase B (each tested on bird_val against its A parent):
   b3_dealias          b1_fs3 with examples rewritten to real table names (checked by execution)
   b3_k5               b1_fs3 with 5 examples
   b3_embed            b1_fs3 with examples chosen by local embeddings (nomic-embed-text), same database first
+                      -> none kept (vs b1_fs3: dealias +2 p=0.84, k5 -4, embed -2). Phase B winner: b1_fs3
 """
 from __future__ import annotations
 
