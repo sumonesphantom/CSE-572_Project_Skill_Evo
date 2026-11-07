@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:
 from skillevo.data import load_tasks  # noqa: E402
 from skillevo.sqlexec import execute  # noqa: E402
 
+from phibench.embed import Embedder  # noqa: E402
 from phibench.examples import build_pools  # noqa: E402
 from phibench.llm import Cache, ChatClient  # noqa: E402
 from phibench.metrics import error_type, ex_summary, gold_rows, rves_reward, soft_f1  # noqa: E402
@@ -247,6 +248,7 @@ def main(argv=None):
     ap.add_argument("--num-ctx", type=int, default=16384)
     ap.add_argument("--think", choices=["on", "off"], help="send Ollama's think flag (default: not sent)")
     ap.add_argument("--no-ves", action="store_true")
+    ap.add_argument("--embed-model", default="nomic-embed-text", help="local Ollama embedding model (b3_embed)")
     a = ap.parse_args(argv)
     tasks, splits = load_data()
     sets = a.sets.split(",")
@@ -260,7 +262,9 @@ def main(argv=None):
         strat = STRATEGIES[name]
         if strat.k_shots and pools is None:
             ev = {i for s in EVAL_SETS for i in eval_ids(splits, s)}
-            pools = build_pools(tasks, splits, SPIDER_TRAIN, ev)
+            emb = Embedder(a.embed_model, a.base_url if a.backend == "ollama" and a.base_url else "http://localhost:11434",
+                           ROOT / "data/cache/phibench_embeddings.sqlite")
+            pools = build_pools(tasks, splits, SPIDER_TRAIN, ev, embedder=emb)
         client = ChatClient(a.model, a.backend, a.base_url, a.label, cache, a.num_ctx, strat.max_tokens,
                             think=None if a.think is None else a.think == "on")
         rn = run_name(client.label, name, a.tag or (f"n{a.limit}" if a.limit else None))

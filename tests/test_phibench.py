@@ -314,3 +314,34 @@ def test_b4_plan_prompt_and_extraction(db):
     reply = ("Columns: dept.id\nJoins: none\nFilters: none\nOutput: count of dept.id\n\n"
              "```sql\nSELECT COUNT(*) FROM dept;\n```")
     assert extract_sql(reply) == "SELECT COUNT(*) FROM dept"
+
+
+# ------------------------------------------------------------------ B3 example variants
+from phibench.examples import dealias  # noqa: E402
+
+
+def test_dealias_rewrites_and_keeps_self_joins(db):
+    sql = "SELECT T2.name FROM emp AS T1 INNER JOIN dept AS T2 ON T1.dept_id = T2.id WHERE T1.salary > 150"
+    assert dealias(sql, db) == "SELECT dept.name FROM emp INNER JOIN dept ON emp.dept_id = dept.id WHERE emp.salary > 150"
+    self_join = "SELECT a.id FROM emp AS a JOIN emp AS b ON a.salary < b.salary"
+    assert dealias(self_join, db) == self_join
+    assert dealias(sql, "") == sql
+
+
+class FakeEmbedder:
+    def embed(self, texts):
+        import numpy as np
+        vocab = ["salary", "department", "budget"]
+        m = np.array([[t.lower().count(w) for w in vocab] for t in texts], dtype=float) + 1e-3
+        return m / np.linalg.norm(m, axis=1, keepdims=True)
+
+
+def test_embed_retriever_same_db_first(db):
+    t = task(db, 9, "salary by department", "SELECT 1")
+    demos = [Demo("a", "toy", "other", "salary by department", "", "S"),
+             Demo("b", "toy", "toy", "department budget", "", "S"),
+             Demo("c", "toy", "toy", "salary salary", "", "S")]
+    pool = Pool(demos, FakeEmbedder())
+    assert [d.id for d in pool.top(t, 3, "embed_samedb")][-1] == "a"
+    with pytest.raises(ValueError):
+        Pool(demos).top(t, 1, "embed_samedb")

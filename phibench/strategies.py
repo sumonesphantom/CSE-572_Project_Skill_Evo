@@ -14,6 +14,10 @@ Phase B (each tested on bird_val against its A parent):
   b2r_fs3             b1_fs3 + stored values in the empty-result retry only (prompt identical to b1_fs3)
                       -> B2 dropped: none of b2/b2m/b2r beat b1_fs3 on bird_val
   b4_fs3              b1_fs3 + a short plan (columns as table.column, joins, filters, output) before the SQL
+                      -> B4 dropped: 12 gained / 18 lost vs b1_fs3, 4x slower
+  b3_dealias          b1_fs3 with examples rewritten to real table names (checked by execution)
+  b3_k5               b1_fs3 with 5 examples
+  b3_embed            b1_fs3 with examples chosen by local embeddings (nomic-embed-text), same database first
 """
 from __future__ import annotations
 
@@ -58,6 +62,7 @@ class Strategy:
     value_mode: str = "all"        # all | maximal (longest match per question span only)
     value_retry_only: bool = False # B2 variant: values only in the empty-result retry, not in the prompt
     plan: bool = False             # B4: short table.column plan before the SQL
+    dealias_demos: bool = False    # B3: examples written with real table names instead of T1/T2
     max_tokens: int = 512
 
     def to_dict(self):
@@ -83,6 +88,12 @@ STRATEGIES = {s.name: s for s in [
     # B4 (B2 dropped: b2/b2m/b2r all net <= 0 vs b1_fs3): plan before SQL on the B1 winner
     Strategy("b4_fs3", schema="mschema", rules=True, k_shots=3, repair="schema", repair_rounds=2, retry_empty=True,
              plan=True, max_tokens=1024),
+    # B3 (B4 dropped: 12 gained / 18 lost vs b1_fs3): example variants, each one change on b1_fs3
+    Strategy("b3_dealias", schema="mschema", rules=True, k_shots=3, repair="schema", repair_rounds=2, retry_empty=True,
+             dealias_demos=True),
+    Strategy("b3_k5", schema="mschema", rules=True, k_shots=5, repair="schema", repair_rounds=2, retry_empty=True),
+    Strategy("b3_embed", schema="mschema", rules=True, k_shots=3, retriever="embed_samedb", repair="schema",
+             repair_rounds=2, retry_empty=True),
 ]}
 
 
@@ -92,7 +103,7 @@ def build_messages(task, strat: Strategy, demos=()) -> list[dict]:
         return repo_prompt(task, [], schema)
     parts = [f"Database schema:\n{schema}"]
     if demos:
-        parts.append("Solved examples from similar questions:\n\n" + format_demos(list(demos)))
+        parts.append("Solved examples from similar questions:\n\n" + format_demos(list(demos), strat.dealias_demos))
     if strat.rules:
         parts.append(GUIDELINES)
     if strat.value_hints and not strat.value_retry_only:
