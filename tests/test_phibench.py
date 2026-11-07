@@ -288,3 +288,20 @@ def test_b2_prompt_has_values_before_question(db):
     user = build_messages(t, STRATEGIES["b2_fs3"], [])[1]["content"]
     assert user.index("Stored values that match") < user.index("Question:")
     assert "Stored values" not in build_messages(t, STRATEGIES["b1_fs3"], [])[1]["content"]
+
+
+def test_maximal_value_matches(tmp_path):
+    p = tmp_path / "v.sqlite"
+    c = sqlite3.connect(p)
+    c.executescript("CREATE TABLE cards (name TEXT, sub TEXT); "
+                    "INSERT INTO cards VALUES ('Serra Angel','Angel'),('Serra','Serra'),('Shrine Keeper','Keeper');")
+    c.commit()
+    c.close()
+    ix = ValueIndex(str(p))
+    q = 'Which card costs more, "Serra Angel" or "Shrine Keeper"?'
+    full = {v for _, _, v in ix.match_question(q)}
+    maxi = {v for _, _, v in ix.match_question(q, maximal=True)}
+    assert {"Serra", "Angel"} <= full and maxi == {"Serra Angel", "Shrine Keeper"}
+    t = task(str(p), 1, q, "SELECT 1", "bird")
+    assert "Stored values" not in build_messages(t, STRATEGIES["b2r_fs3"], [])[1]["content"]
+    assert build_messages(t, STRATEGIES["b2r_fs3"], []) == build_messages(t, STRATEGIES["b1_fs3"], [])

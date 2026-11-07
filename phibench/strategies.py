@@ -10,6 +10,8 @@ Phase B (each tested on bird_val against its A parent):
   b1_rules / b1_fs3   a3 / a4 + schema-aware repair (phibench.repair), up to 2 rounds, retry on empty
   b2_fs3              b1_fs3 + value retrieval (phibench.values): exact stored spellings in the prompt
                       and in the empty-result retry
+  b2m_fs3             b2_fs3 with only the longest match per question span
+  b2r_fs3             b1_fs3 + stored values in the empty-result retry only (prompt identical to b1_fs3)
 """
 from __future__ import annotations
 
@@ -41,6 +43,8 @@ class Strategy:
     repair_rounds: int = 1         # max repair turns
     retry_empty: bool = False      # B1: also retry when the query runs but returns no rows
     value_hints: bool = False      # B2: stored values matching the question, in the prompt and the empty retry
+    value_mode: str = "all"        # all | maximal (longest match per question span only)
+    value_retry_only: bool = False # B2 variant: values only in the empty-result retry, not in the prompt
     max_tokens: int = 512
 
     def to_dict(self):
@@ -58,6 +62,11 @@ STRATEGIES = {s.name: s for s in [
     # B2: value retrieval on top of the B1 winner
     Strategy("b2_fs3", schema="mschema", rules=True, k_shots=3, repair="schema", repair_rounds=2, retry_empty=True,
              value_hints=True),
+    # after b2_fs3 lost 10 / gained 8 on bird_val (partial matches such as 'Serra' next to 'Serra Angel'):
+    Strategy("b2m_fs3", schema="mschema", rules=True, k_shots=3, repair="schema", repair_rounds=2, retry_empty=True,
+             value_hints=True, value_mode="maximal"),
+    Strategy("b2r_fs3", schema="mschema", rules=True, k_shots=3, repair="schema", repair_rounds=2, retry_empty=True,
+             value_hints=True, value_retry_only=True),
 ]}
 
 
@@ -70,8 +79,8 @@ def build_messages(task, strat: Strategy, demos=()) -> list[dict]:
         parts.append("Solved examples from similar questions:\n\n" + format_demos(list(demos)))
     if strat.rules:
         parts.append(GUIDELINES)
-    if strat.value_hints:
-        hints = value_hints(task)
+    if strat.value_hints and not strat.value_retry_only:
+        hints = value_hints(task, maximal=strat.value_mode == "maximal")
         if hints:
             parts.append(hints)
     if task.evidence:

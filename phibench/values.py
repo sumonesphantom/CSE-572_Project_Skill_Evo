@@ -67,10 +67,17 @@ class ValueIndex:
         return out - _STOP
 
     def phrases(self, text: str, max_n: int = 4) -> list[str]:
-        quoted = [q.lower() for q in re.findall(r"['\"]([^'\"]{2,80})['\"]", text)]
+        return [p for p, _ in self.spans(text, max_n)]
+
+    def spans(self, text: str, max_n: int = 4) -> list[tuple[str, frozenset]]:
+        """Candidate phrases with the word positions they cover, longest first."""
         sal = self.salient(text)
         ws = _words(text)
-        grams = []
+        out = []
+        for q in re.findall(r"['\"]([^'\"]{2,80})['\"]", text):
+            qw = _words(q)
+            pos = frozenset(i + k for i in range(len(ws) - len(qw) + 1) if ws[i:i + len(qw)] == qw for k in range(len(qw)))
+            out.append((q.lower(), pos))
         for n in range(max_n, 0, -1):
             for i in range(len(ws) - n + 1):
                 g = ws[i:i + n]
@@ -78,12 +85,21 @@ class ValueIndex:
                     continue
                 if n == 1 and (g[0] in _EXTRA_STOP or len(g[0]) < 3 or g[0].isdigit()):
                     continue
-                grams.append(" ".join(g))
-        return list(dict.fromkeys(quoted + grams))
+                out.append((" ".join(g), frozenset(range(i, i + n))))
+        seen, uniq = set(), []
+        for p, pos in out:
+            if p not in seen:
+                seen.add(p)
+                uniq.append((p, pos))
+        return uniq
 
-    def match_question(self, text: str, max_hits: int = 10, per_col: int = 3) -> list[tuple[str, str, str]]:
+    def match_question(self, text: str, max_hits: int = 10, per_col: int = 3,
+                       maximal: bool = False) -> list[tuple[str, str, str]]:
+        """maximal=True: once a phrase matches, shorter phrases inside the same words are skipped
+        (no 'Serra' after 'Serra Angel'), and contains-matches are only tried for uncovered words."""
         hits: list[tuple[str, str, str]] = []
         seen, per = set(), defaultdict(int)
+        covered: set[int] = set()
 
         def add(t, c, v):
             if (t, c, v) in seen or per[(t, c)] >= per_col:
@@ -92,11 +108,18 @@ class ValueIndex:
             per[(t, c)] += 1
             hits.append((t, c, v))
 
-        phrases = self.phrases(text)
-        for p in phrases:                       # 1) whole value equals a phrase (longest phrases first)
-            for t, c, v in self.exact.get(p, []):
+        spans = self.spans(text)
+        for p, pos in spans:                    # 1) whole value equals a phrase (longest phrases first)
+            if maximal and pos and pos <= covered:
+                continue
+            found = self.exact.get(p, [])
+            for t, c, v in found:
                 add(t, c, v)
-        for p in phrases:                       # 2) a stored value contains all words of a phrase
+            if found and maximal:
+                covered |= pos
+        for p, pos in spans:                    # 2) a stored value contains all words of a phrase
+            if maximal and pos and pos & covered:
+                continue
             ws = p.split()
             if len(ws) == 1 and len(ws[0]) < 4:
                 continue
@@ -106,6 +129,8 @@ class ValueIndex:
             for low in sorted(cands, key=len):
                 for t, c, v in self.exact[low]:
                     add(t, c, v)
+            if maximal:
+                covered |= pos
         return hits[:max_hits]
 
     # ----------------------------------------------------------- literal -> stored values
@@ -130,8 +155,8 @@ def index_for(db_path: str) -> ValueIndex:
     return ValueIndex(db_path)
 
 
-def value_hints(task) -> str:
-    hits = index_for(task.db_path).match_question(f"{task.question} {task.evidence}")
+def value_hints(task, maximal: bool = False) -> str:
+    hits = index_for(task.db_path).match_question(f"{task.question} {task.evidence}", maximal=maximal)
     if not hits:
         return ""
     lines = [f"- {quote_ident(t)}.{quote_ident(c)} = '{v.replace(chr(39), chr(39) * 2)}'" for t, c, v in hits]
