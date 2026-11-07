@@ -31,6 +31,7 @@ from skillevo.retrieval import retrieve, task_query  # noqa: E402
 from skillevo.skills import SkillLibrary  # noqa: E402
 from skillevo.sqlexec import execute  # noqa: E402
 
+from bench.extract import extract_sql as robust_extract_sql  # noqa: E402
 from bench.fewshot import build_pools  # noqa: E402
 from bench.metrics import error_type, ex_summary, gold_rows, rves_reward, soft_f1  # noqa: E402
 from bench.strategies import LADDER, RUNG, build_messages  # noqa: E402
@@ -39,6 +40,7 @@ EVAL_SETS = {  # name -> (dataset:split, max) ; spider_test uses the same 200-ta
     "bird_val": ("bird:val", None),
     "bird_test": ("bird:test", None),
     "spider_test": ("spider:test", 200),
+    "spider_val": ("spider:val", 100),      # selection set for the small-model rungs (as in the Llama 1B benchmark)
     "bird_all": ("bird:*", None),           # all 500 mini-dev questions (leaderboard-comparable; zero-shot only)
     "spider_test_full": ("spider:test", None),
 }
@@ -76,6 +78,8 @@ class Bench:
         self.library = SkillLibrary.load(library) if library else None
         self.library_path = library
         self.top_k, self.min_score, self.repair, self.ves, self.workers = top_k, min_score, repair, ves, workers
+        self.num_ctx = num_ctx
+        self.extract = robust_extract_sql if self.strat.extract == "robust" else extract_sql
         self.tasks = {}
         for f in ("bird", "spider"):
             self.tasks.update(load_tasks(ROOT / f"data/processed/{f}.jsonl"))
@@ -85,7 +89,7 @@ class Bench:
     # ---------------------------------------------------------------- one candidate
     def _attempt(self, task, msgs, temperature, sample):
         reply, meta = self.llm.chat_meta(msgs, temperature, sample)
-        sql = extract_sql(reply)
+        sql = self.extract(reply)
         rows, err = execute(task.db_path, sql, 30)
         metas = [meta]
         first = {"sql": sql, "err": err, "rows": rows}
@@ -94,7 +98,7 @@ class Bench:
                             {"role": "user", "content": f"That query failed with: {err}\nFix it. Return only the corrected ```sql block."}]
             reply2, meta2 = self.llm.chat_meta(msgs2, temperature, sample)
             metas.append(meta2)
-            sql2 = extract_sql(reply2)
+            sql2 = self.extract(reply2)
             rows, err = execute(task.db_path, sql2, 30)
             return {"sql": sql2, "err": err, "rows": rows, "first": first, "repaired": True, "metas": metas, "reply": reply2}
         return {**first, "first": first, "repaired": False, "metas": metas, "reply": reply}
@@ -132,6 +136,8 @@ class Bench:
             "llm_calls": len(metas), "llm_seconds": round(sum(m.get("seconds") or 0 for m in metas), 2),
             "in_tokens": sum(m.get("in_tokens") or 0 for m in metas), "out_tokens": sum(m.get("out_tokens") or 0 for m in metas),
             "cached": all(m.get("cached") for m in metas), "wall_seconds": round(time.time() - t0, 2),
+            # prompt + answer hit the context window: Ollama silently drops the start of the prompt
+            "ctx_overflow": any((m.get("in_tokens") or 0) + self.strat.max_tokens > self.num_ctx for m in metas),
         }
         return rec
 
@@ -199,6 +205,7 @@ def summarize_set(recs: list[dict]) -> dict:
         "avg_llm_calls": sum(r["llm_calls"] for r in recs) / n,
         **_avg_known(recs, ("llm_seconds", "out_tokens", "in_tokens")),
         "errors": dict(Counter(r["error_type"] for r in recs)),
+        "ctx_overflow_rate": sum(bool(r.get("ctx_overflow")) for r in recs) / n,
     })
     rv = [r["rves"] for r in recs if r.get("rves") is not None]
     if rv:

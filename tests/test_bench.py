@@ -101,7 +101,8 @@ class ScriptedLLM:
 def _bench(strategy):
     b = brun.Bench.__new__(brun.Bench)
     b.strat, b.llm, b.library, b.repair, b.ves, b.pools = LADDER[strategy], ScriptedLLM(), None, True, False, {}
-    b.top_k, b.min_score = 3, 0.5
+    b.top_k, b.min_score, b.num_ctx = 3, 0.5, 16384
+    b.extract = brun.extract_sql
     return b
 
 
@@ -141,3 +142,39 @@ def test_greedy_cache_key_unchanged():
     llm = make_llm("m")
     assert llm._key([{"role": "user", "content": "x"}]) == llm._key([{"role": "user", "content": "x"}], 0.0, 0)
     assert llm._key([{"role": "user", "content": "x"}]) != llm._key([{"role": "user", "content": "x"}], 0.7, 1)
+
+
+# ------------------------------------------------------------------ SmolLM2 rungs (S1-S9)
+def test_robust_extraction_handles_unfenced_replies():
+    from bench.extract import extract_sql as robust
+    assert robust("Sure! SELECT a FROM t; This query selects a.") == "SELECT a FROM t"
+    assert robust("```sql\nSELECT a FROM t\n") == "SELECT a FROM t"          # unclosed fence
+    assert robust("```sql\nSELECT 1\n```\nmore text") == "SELECT 1"
+
+
+def test_sm_extract_keeps_repo_prompt_and_pruned_rungs_build(db):
+    t = task(db)
+    assert build_messages(t, LADDER["sm_extract"]) == build_messages(t, LADDER["zs_repo"])  # shares the cache
+    msg = build_messages(t, LADDER["sm_pruned"])[1]["content"]
+    assert "CREATE TABLE emp" in msg and "Question:" in msg
+
+
+def test_unfenced_reply_scored_only_with_robust_extraction(db):
+    class Prose(ScriptedLLM):
+        def chat_meta(self, msgs, temperature=0.0, sample=0):
+            return "Here is the query: SELECT COUNT(*) FROM emp WHERE dept_id=1", {"cached": True}
+    plain, robust = _bench("zs_rules"), _bench("sm_pruned_rules")
+    plain.llm = robust.llm = Prose()
+    robust.extract = brun.robust_extract_sql
+    assert not plain.solve(task(db))["correct"]
+    assert robust.solve(task(db))["correct"]
+
+
+def test_context_overflow_flag(db):
+    class Long(ScriptedLLM):
+        def chat_meta(self, msgs, temperature=0.0, sample=0):
+            return "```sql\nSELECT COUNT(*) FROM emp WHERE dept_id=1\n```", {"cached": False, "in_tokens": 7900}
+    b = _bench("zs_rules")
+    b.llm, b.num_ctx = Long(), 8192
+    r = b.solve(task(db))
+    assert r["ctx_overflow"] and brun.summarize_set([{**r, "set": "x"}])["ctx_overflow_rate"] == 1.0

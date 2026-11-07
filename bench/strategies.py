@@ -26,6 +26,7 @@ from skillevo.solver import SYSTEM as REPO_SYSTEM
 from skillevo.solver import build_prompt as repo_prompt
 
 from .fewshot import format_demos
+from .pruned import schema_for
 from .schema import render
 
 RULES = """Rules:
@@ -53,6 +54,8 @@ class Strategy:
     n_samples: int = 1          # >1 => self-consistency with execution voting
     temperature: float = 0.7    # for samples 1..n-1 (sample 0 is greedy)
     max_tokens: int = 512
+    extract: str = "repo"       # "robust": bench.extract (tolerates missing / unclosed code fences)
+    prune: int = 0              # schema "compact": keep only the N tables most related to the question (0 = all)
 
     def to_dict(self):
         return asdict(self)
@@ -73,14 +76,31 @@ LADDER = {s.name: s for s in [
     Strategy("ms_rules", schema="mschema", rules=True),
     Strategy("ms_fs3", schema="mschema", rules=True, k_shots=3),
     Strategy("ms_fs3_sc5", schema="mschema", rules=True, k_shots=3, n_samples=5),
+    # SmolLM2 ladder (S rungs). SmolLM2 has an 8k context, so the schema is the compact /
+    # pruned rendering from the Llama 1B benchmark (bench/pruned.py) instead of M-Schema.
+    Strategy("sm_extract", schema="ddl_samples", extract="robust"),
+    Strategy("sm_compact", schema="compact", extract="robust"),
+    Strategy("sm_pruned", schema="compact", prune=4, extract="robust"),
+    Strategy("sm_pruned_rules", schema="compact", prune=4, rules=True, extract="robust"),
+    Strategy("sm_pruned_fs1", schema="compact", prune=4, k_shots=1, extract="robust"),
+    Strategy("sm_pruned_fs3", schema="compact", prune=4, k_shots=3, extract="robust"),
+    Strategy("sm_pruned_sc5", schema="compact", prune=4, n_samples=5, extract="robust"),
+    Strategy("sm_pruned_fs1_sc5", schema="compact", prune=4, k_shots=1, n_samples=5, extract="robust"),
+    Strategy("sm_pruned_fs3_sc5", schema="compact", prune=4, k_shots=3, n_samples=5, extract="robust"),
 ]}
-BRANCH = {"zs_repo_full": "P1b", "ms_rules": "P4m", "ms_fs3": "P5m", "ms_fs3_sc5": "P7m"}
+BRANCH = {"zs_repo_full": "P1b", "ms_rules": "P4m", "ms_fs3": "P5m", "ms_fs3_sc5": "P7m",
+          "sm_extract": "S1", "sm_compact": "S2", "sm_pruned": "S3", "sm_pruned_rules": "S4",
+          "sm_pruned_fs1": "S5", "sm_pruned_fs3": "S6", "sm_pruned_sc5": "S7",
+          "sm_pruned_fs1_sc5": "S8", "sm_pruned_fs3_sc5": "S9"}
 _MAIN = [n for n in LADDER if n not in BRANCH]
 RUNG = {**{name: f"P{i}" for i, name in enumerate(_MAIN)}, **BRANCH}
 
 
 def build_messages(task, strat: Strategy, skills=(), demos=()) -> list[dict]:
-    schema = render(task.db_path, strat.schema)
+    if strat.schema == "compact":
+        schema = schema_for(task, prune=strat.prune)
+    else:
+        schema = render(task.db_path, strat.schema)
     if strat.schema == "ddl_samples" and not (strat.rules or demos or strat.cot):
         return repo_prompt(task, list(skills), schema)  # byte-identical to the repo solver prompt
     parts = [f"Database schema:\n{schema}"]
