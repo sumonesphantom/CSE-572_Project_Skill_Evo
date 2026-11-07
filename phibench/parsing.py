@@ -16,16 +16,26 @@ _START = re.compile(r"\b(WITH|SELECT)\b", re.I)
 
 
 def first_statement(sql: str) -> str:
-    """Cut at the first ';' that is outside quotes/backticks/brackets."""
-    quote = None
-    for i, ch in enumerate(sql):
+    """Cut at the first ';' outside quotes, backticks, brackets and -- / /* */ comments."""
+    i, n, quote = 0, len(sql), None
+    while i < n:
+        ch = sql[i]
         if quote:
             if ch == quote or (quote == "[" and ch == "]"):
                 quote = None
+        elif sql.startswith("--", i):
+            j = sql.find("\n", i)
+            i = n if j == -1 else j
+            continue
+        elif sql.startswith("/*", i):
+            j = sql.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+            continue
         elif ch in "'\"`[":
             quote = ch
         elif ch == ";":
             return sql[:i]
+        i += 1
     return sql
 
 

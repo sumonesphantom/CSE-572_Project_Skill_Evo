@@ -74,6 +74,7 @@ class Bench:
         self.client, self.strat = client, STRATEGIES[strategy]
         self.tasks, self.splits, self.pools = tasks, splits, pools or {}
         self.workers, self.ves, self.sql_timeout = workers, ves, sql_timeout
+        self.wall: dict[str, dict] = {}
         if self.strat.k_shots and not self.pools:
             raise ValueError(f"{strategy} needs few-shot pools")
 
@@ -162,10 +163,15 @@ class Bench:
                     done[(s, rec["task_id"])] = rec
                     if k % 20 == 0 or k == len(todo):
                         log(f"    {k}/{len(todo)}  {time.time() - t0:.0f}s")
+            if todo:
+                self.wall[s] = {"solved": len(todo), "seconds": round(time.time() - t0, 1)}
             if self.ves and s.startswith("bird"):
                 self._time_rves(s, ids, done, pred_f)
         recs = {s: [done[(s, i)] for i in set_ids[s] if (s, i) in done] for s in sets}
         metrics = {s: summarize(r) for s, r in recs.items()}
+        for s, w in self.wall.items():  # real throughput, only for sets solved in this invocation
+            if metrics.get(s):
+                metrics[s]["wall_seconds_per_question"] = round(w["seconds"] / w["solved"], 2)
         old_metrics = {}
         mfile = out_dir / "metrics.json"
         if mfile.exists():

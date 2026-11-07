@@ -72,6 +72,8 @@ class FakeLLM:
     ("SELECT a\nFROM t\n\nThis query selects a.", "SELECT a\nFROM t"),
     ("<think>hmm</think>```sql\nWITH x AS (SELECT 1) SELECT * FROM x\n```", "WITH x AS (SELECT 1) SELECT * FROM x"),
     ("```sql\nSELECT 1; SELECT 2;\n```", "SELECT 1"),
+    ("```sql\nSELECT a -- Riverside's code\nFROM t; SELECT 2\n```", "SELECT a -- Riverside's code\nFROM t"),
+    ("```sql\nSELECT a /* it's ; fine */ FROM t; DROP x\n```", "SELECT a /* it's ; fine */ FROM t"),
 ])
 def test_extract_sql(reply, want):
     assert extract_sql(reply) == want
