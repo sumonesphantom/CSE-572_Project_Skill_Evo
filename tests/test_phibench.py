@@ -199,3 +199,71 @@ def test_cache_key_separates_settings(tmp_path):
 
 def test_summarize_empty():
     assert summarize([]) == {}
+
+
+# ------------------------------------------------------------------ B1 schema-aware repair
+from phibench.repair import diagnose  # noqa: E402
+from skillevo.sqlexec import execute  # noqa: E402
+
+
+def _err(db, sql):
+    return execute(db, sql, 5)[1]
+
+
+def test_diagnose_wrong_alias_names_the_right_table(db):
+    sql = "SELECT T1.name FROM emp AS T1 JOIN dept AS T2 ON T1.dept_id = T2.id"
+    h = diagnose(db, sql, _err(db, sql))
+    assert "T1 refers to table emp" in h and "Columns of emp" in h and "exists in: dept (in your query: T2)" in h
+
+
+def test_diagnose_close_names_functions_and_quoting(db):
+    sql = "SELECT salry FROM emp"
+    assert "emp.salary" in diagnose(db, sql, _err(db, sql))
+    sql = "SELECT YEAR(salary) FROM emp"
+    assert "strftime('%Y', col)" in diagnose(db, sql, _err(db, sql))
+    sql = "SELECT Hire Year FROM emp WHERE"
+    assert "`Hire Year`" in diagnose(db, sql, "near \"WHERE\": syntax error")
+
+
+class RepairLLM:
+    """Bad column first; after a schema hint, an empty result; after the empty retry, correct."""
+    model = label = "repair"
+    backend, num_ctx = "fake", 0
+
+    def __init__(self, stubborn=False):
+        self.calls, self.stubborn = 0, stubborn
+
+    def chat(self, messages, temperature=0.0, sample=0):
+        self.calls += 1
+        last = messages[-1]["content"]
+        if self.stubborn or len(messages) == 2:
+            sql = "SELECT T1.name FROM emp AS T1 JOIN dept AS T2 ON T1.dept_id = T2.id"
+        elif "exists in: dept" in last:
+            sql = "SELECT T2.name FROM emp AS T1 JOIN dept AS T2 ON T1.dept_id = T2.id WHERE T2.name = 'Sales'"
+        elif "returned no rows" in last:
+            sql = "SELECT T2.name FROM emp AS T1 JOIN dept AS T2 ON T1.dept_id = T2.id WHERE T2.name = 'sales'"
+        else:
+            sql = "SELECT 0"
+        return f"```sql\n{sql}\n```", {}
+
+
+def _repair_bench(db, strategy, llm):
+    t = task(db, 1, "Department names of sales staff?", "SELECT T2.name FROM emp AS T1 JOIN dept AS T2 "
+             "ON T1.dept_id = T2.id WHERE T2.name = 'sales'", "bird")
+    return Bench(llm, strategy, {t.id: t}, {"bird": {"val": [t.id]}}, workers=1, ves=False), t
+
+
+def test_b1_repairs_through_hint_and_empty_retry(db):
+    b, t = _repair_bench(db, "b1_rules", RepairLLM())
+    r = b.solve(t)
+    assert r["correct"] and r["repair_kinds"] == ["error", "empty"] and r["llm_calls"] == 3
+    b, t = _repair_bench(db, "a3_rules", RepairLLM())   # plain repair: one round, no hint
+    r = b.solve(t)
+    assert not r["correct"] and r["repair_kinds"] == ["error"]
+
+
+def test_b1_stops_after_max_rounds(db):
+    llm = RepairLLM(stubborn=True)
+    b, t = _repair_bench(db, "b1_rules", llm)
+    r = b.solve(t)
+    assert not r["correct"] and r["repair_kinds"] == ["error", "error"] and llm.calls == 3

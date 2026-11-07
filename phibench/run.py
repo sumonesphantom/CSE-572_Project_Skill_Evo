@@ -33,6 +33,7 @@ from phibench.examples import build_pools  # noqa: E402
 from phibench.llm import Cache, ChatClient  # noqa: E402
 from phibench.metrics import error_type, ex_summary, gold_rows, rves_reward, soft_f1  # noqa: E402
 from phibench.parsing import extract_sql  # noqa: E402
+from phibench.repair import EMPTY_MESSAGE, error_message  # noqa: E402
 from phibench.strategies import STRATEGIES, build_messages  # noqa: E402
 
 EVAL_SETS = {  # name -> (dataset, split, max); spider_test = the same seeded 200 as config.yaml
@@ -94,15 +95,24 @@ class Bench:
         sql = extract_sql(reply)
         rows, err, ok, gold = self._run_sql(task, sql)
         first = {"sql": sql, "err": err, "ok": ok}
-        repaired = False
-        if self.strat.repair == "error" and err:
-            msgs2 = msgs + [{"role": "assistant", "content": reply},
-                            {"role": "user", "content": REPAIR_MSG.format(err=err)}]
-            reply, meta2 = self.client.chat(msgs2)
-            metas.append(meta2)
+        kinds: list[str] = []
+        hist = msgs
+        while self.strat.repair != "none" and len(kinds) < self.strat.repair_rounds:
+            if err:
+                kind = "error"
+                fb = (error_message(task.db_path, sql, err) if self.strat.repair == "schema"
+                      else REPAIR_MSG.format(err=err))
+            elif self.strat.retry_empty and not rows:
+                kind, fb = "empty", EMPTY_MESSAGE
+            else:
+                break
+            hist = hist + [{"role": "assistant", "content": reply}, {"role": "user", "content": fb}]
+            reply, m2 = self.client.chat(hist)
+            metas.append(m2)
             sql = extract_sql(reply)
             rows, err, ok, gold = self._run_sql(task, sql)
-            repaired = True
+            kinds.append(kind)
+        repaired = bool(kinds)
         n_rows = len(rows) if rows is not None else 0
         return {
             "task_id": task.id, "dataset": task.dataset, "db_id": task.db_id, "difficulty": task.difficulty,
@@ -110,7 +120,7 @@ class Bench:
             "executable": err is None, "error": err, "error_type": error_type(err, ok, n_rows), "n_rows": n_rows,
             "soft_f1": soft_f1(rows if err is None else [], gold or []) if gold is not None else 0.0,
             "rves": None, "sql": sql, "first_sql": first["sql"] if repaired else None, "reply": reply,
-            "demos": [d.id for d in demos], "llm_calls": len(metas),
+            "repair_kinds": kinds, "demos": [d.id for d in demos], "llm_calls": len(metas),
             "llm_seconds": round(sum(m.get("seconds") or 0 for m in metas), 3),
             "in_tokens": sum(m.get("in_tokens") or 0 for m in metas),
             "out_tokens": sum(m.get("out_tokens") or 0 for m in metas),

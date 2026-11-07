@@ -5,8 +5,9 @@
   a3_rules    a2 + output guidelines
   a4_fs3      a3 + 3 retrieved solved examples (same database first)
 
-Every strategy keeps one repair turn when the query raises an SQLite error.
-Phase B strategies are added here as they are implemented.
+Every A strategy keeps one repair turn when the query raises an SQLite error.
+Phase B (each tested on bird_val against its A parent):
+  b1_rules / b1_fs3   a3 / a4 + schema-aware repair (phibench.repair), up to 2 rounds, retry on empty
 """
 from __future__ import annotations
 
@@ -33,7 +34,9 @@ class Strategy:
     rules: bool = False
     k_shots: int = 0
     retriever: str = "bm25_samedb"
-    repair: str = "error"          # none | error
+    repair: str = "error"          # none | error (SQLite message only) | schema (B1: database-grounded hints)
+    repair_rounds: int = 1         # max repair turns
+    retry_empty: bool = False      # B1: also retry when the query runs but returns no rows
     max_tokens: int = 512
 
     def to_dict(self):
@@ -45,6 +48,9 @@ STRATEGIES = {s.name: s for s in [
     Strategy("a2_mschema", schema="mschema"),
     Strategy("a3_rules", schema="mschema", rules=True),
     Strategy("a4_fs3", schema="mschema", rules=True, k_shots=3),
+    # B1: schema-aware repair, up to 2 rounds, plus a retry on empty results (on both tied A rungs)
+    Strategy("b1_rules", schema="mschema", rules=True, repair="schema", repair_rounds=2, retry_empty=True),
+    Strategy("b1_fs3", schema="mschema", rules=True, k_shots=3, repair="schema", repair_rounds=2, retry_empty=True),
 ]}
 
 
