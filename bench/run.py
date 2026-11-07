@@ -141,6 +141,21 @@ class Bench:
         }
         return rec
 
+    def safe_solve(self, tid) -> dict:
+        """solve(), but a task whose LLM calls keep failing is recorded as wrong (error_type llm_error)
+        instead of killing the whole run; the next run retries it."""
+        try:
+            return self.solve(self.tasks[tid])
+        except RuntimeError as e:
+            t = self.tasks[tid]
+            print(f"    LLM error on {tid}: {e}", flush=True)
+            return {"task_id": tid, "dataset": t.dataset, "db_id": t.db_id, "difficulty": t.difficulty,
+                    "correct": False, "first_correct": False, "repaired": False, "error": str(e),
+                    "error_type": "llm_error", "executable": False, "n_rows": 0, "soft_f1": 0.0, "rves": 0.0,
+                    "sql": "", "first_sql": None, "skills": [], "demos": [], "n_candidates": 0, "vote_size": 0,
+                    "oracle_correct": False, "llm_calls": 0, "llm_seconds": 0, "in_tokens": 0, "out_tokens": 0,
+                    "cached": False, "wall_seconds": 0, "ctx_overflow": False}
+
     def _time_rves(self, s, ids, done, pred_f):
         """Single-threaded R-VES timing for BIRD predictions that lack it; rewrites preds.jsonl once."""
         todo = [done[(s, i)] for i in ids if (s, i) in done and done[(s, i)].get("rves") is None]
@@ -164,6 +179,8 @@ class Bench:
                     r = json.loads(line)
                 except json.JSONDecodeError:
                     continue  # last line cut off by a kill; that task is simply solved again
+                if r.get("error_type") == "llm_error":
+                    continue  # the LLM server failed on this task last time: solve it again
                 done[(r["set"], r["task_id"])] = r
         meta = {"model": self.llm.model, "strategy": self.strat.to_dict(), "rung": RUNG[self.strat.name],
                 "library": str(self.library_path) if self.library_path else None,
@@ -176,13 +193,16 @@ class Bench:
             log(f"  [{s}] {len(ids)} tasks, {len(todo)} to solve")
             t0 = time.time()
             with ThreadPoolExecutor(self.workers) as ex, open(pred_f, "a") as fh:
-                for k, rec in enumerate(ex.map(lambda tid: self.solve(self.tasks[tid]), todo), 1):
+                for k, rec in enumerate(ex.map(self.safe_solve, todo), 1):
                     rec["set"] = s
                     fh.write(json.dumps(rec, default=str) + "\n")
                     fh.flush()
                     done[(s, rec["task_id"])] = rec
                     if k % 25 == 0:
                         log(f"    {k}/{len(todo)}  {time.time() - t0:.0f}s")
+            n_err = sum(done[(s, i)].get("error_type") == "llm_error" for i in ids if (s, i) in done)
+            if n_err:
+                log(f"    WARNING: {n_err} tasks failed with LLM-server errors (counted wrong); rerun to retry them")
             if self.ves and s.startswith("bird"):
                 self._time_rves(s, ids, done, pred_f)
         recs = {s: [done[(s, i)] for i in set_ids[s] if (s, i) in done] for s in sets}

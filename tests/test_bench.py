@@ -178,3 +178,17 @@ def test_context_overflow_flag(db):
     b.llm, b.num_ctx = Long(), 8192
     r = b.solve(task(db))
     assert r["ctx_overflow"] and brun.summarize_set([{**r, "set": "x"}])["ctx_overflow_rate"] == 1.0
+
+
+def test_llm_failure_is_recorded_not_fatal_and_retried(db, tmp_path):
+    class Down(ScriptedLLM):
+        def chat_meta(self, msgs, temperature=0.0, sample=0):
+            raise RuntimeError("Ollama call failed: 500")
+    b = _bench("zs_rules")
+    b.llm, b.ves, b.workers, b.library_path = Down(), False, 1, None
+    t = task(db)
+    b.tasks, b.splits = {t.id: t}, {"bird": {"val": [t.id]}}
+    m = b.run(["bird_val"], tmp_path / "r")
+    assert m["bird_val"]["n"] == 1 and m["bird_val"]["ex"] == 0 and m["bird_val"]["errors"] == {"llm_error": 1}
+    b.llm = ScriptedLLM()                      # server back: the failed task is solved again on rerun
+    assert b.run(["bird_val"], tmp_path / "r")["bird_val"]["errors"] == {"wrong_result": 1}

@@ -94,7 +94,8 @@ class OllamaLLM:
             "options": {"temperature": temperature, "seed": sample, "num_ctx": self.num_ctx,
                         "num_predict": self.max_tokens},
         }
-        for attempt in range(3):
+        # 6 attempts, ~2.5 min of back-off: long enough for Ollama to restart a crashed model runner
+        for attempt in range(6):
             try:
                 r = requests.post(f"{self.host}/api/chat", json=payload, timeout=self.timeout)
                 r.raise_for_status()
@@ -102,9 +103,9 @@ class OllamaLLM:
                 return j["message"]["content"], {"in_tokens": j.get("prompt_eval_count"),
                                                  "out_tokens": j.get("eval_count")}
             except (requests.RequestException, KeyError) as e:
-                if attempt == 2:
+                if attempt == 5:
                     raise RuntimeError(f"Ollama call to {self.api_model} failed: {e}") from e
-                time.sleep(2 * (attempt + 1))
+                time.sleep(min(5 * 2 ** attempt, 60))
         raise AssertionError("unreachable")
 
 
