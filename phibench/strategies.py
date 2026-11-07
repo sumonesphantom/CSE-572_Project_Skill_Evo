@@ -12,6 +12,8 @@ Phase B (each tested on bird_val against its A parent):
                       and in the empty-result retry
   b2m_fs3             b2_fs3 with only the longest match per question span
   b2r_fs3             b1_fs3 + stored values in the empty-result retry only (prompt identical to b1_fs3)
+                      -> B2 dropped: none of b2/b2m/b2r beat b1_fs3 on bird_val
+  b4_fs3              b1_fs3 + a short plan (columns as table.column, joins, filters, output) before the SQL
 """
 from __future__ import annotations
 
@@ -32,6 +34,16 @@ GUIDELINES = """Guidelines:
 5. Add ORDER BY ... LIMIT only when the question asks for the highest, lowest, first or last item(s)."""
 
 
+PLAN_SYSTEM = (
+    "You are an expert SQLite analyst. Before writing SQL, write a short plan in plain text:\n"
+    "Columns: every column you will use, written as table.column, checked against the schema\n"
+    "Joins: each join condition, using the foreign keys listed in the schema\n"
+    "Filters: each condition, with values copied exactly from the question or External knowledge\n"
+    "Output: the exact columns the question asks for\n"
+    "Then write ONE SQLite query in a single ```sql code block at the very end. Do not put SQL in the plan."
+)
+
+
 @dataclass(frozen=True)
 class Strategy:
     name: str
@@ -45,6 +57,7 @@ class Strategy:
     value_hints: bool = False      # B2: stored values matching the question, in the prompt and the empty retry
     value_mode: str = "all"        # all | maximal (longest match per question span only)
     value_retry_only: bool = False # B2 variant: values only in the empty-result retry, not in the prompt
+    plan: bool = False             # B4: short table.column plan before the SQL
     max_tokens: int = 512
 
     def to_dict(self):
@@ -67,6 +80,9 @@ STRATEGIES = {s.name: s for s in [
              value_hints=True, value_mode="maximal"),
     Strategy("b2r_fs3", schema="mschema", rules=True, k_shots=3, repair="schema", repair_rounds=2, retry_empty=True,
              value_hints=True, value_retry_only=True),
+    # B4 (B2 dropped: b2/b2m/b2r all net <= 0 vs b1_fs3): plan before SQL on the B1 winner
+    Strategy("b4_fs3", schema="mschema", rules=True, k_shots=3, repair="schema", repair_rounds=2, retry_empty=True,
+             plan=True, max_tokens=1024),
 ]}
 
 
@@ -86,4 +102,5 @@ def build_messages(task, strat: Strategy, demos=()) -> list[dict]:
     if task.evidence:
         parts.append(f"External knowledge: {task.evidence}")
     parts.append(f"Question: {task.question}")
-    return [{"role": "system", "content": REPO_SYSTEM}, {"role": "user", "content": "\n\n".join(parts)}]
+    return [{"role": "system", "content": PLAN_SYSTEM if strat.plan else REPO_SYSTEM},
+            {"role": "user", "content": "\n\n".join(parts)}]

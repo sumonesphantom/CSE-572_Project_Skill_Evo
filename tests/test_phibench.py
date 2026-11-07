@@ -305,3 +305,12 @@ def test_maximal_value_matches(tmp_path):
     t = task(str(p), 1, q, "SELECT 1", "bird")
     assert "Stored values" not in build_messages(t, STRATEGIES["b2r_fs3"], [])[1]["content"]
     assert build_messages(t, STRATEGIES["b2r_fs3"], []) == build_messages(t, STRATEGIES["b1_fs3"], [])
+
+
+def test_b4_plan_prompt_and_extraction(db):
+    t = task(db, 1, "How many departments?", "SELECT COUNT(*) FROM dept", "bird")
+    sys_msg = build_messages(t, STRATEGIES["b4_fs3"], [])[0]["content"]
+    assert "table.column" in sys_msg and build_messages(t, STRATEGIES["b1_fs3"], [])[0]["content"] != sys_msg
+    reply = ("Columns: dept.id\nJoins: none\nFilters: none\nOutput: count of dept.id\n\n"
+             "```sql\nSELECT COUNT(*) FROM dept;\n```")
+    assert extract_sql(reply) == "SELECT COUNT(*) FROM dept"
