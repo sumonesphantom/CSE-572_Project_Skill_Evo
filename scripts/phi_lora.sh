@@ -49,12 +49,23 @@ case "${1:-}" in
     ls -lh data/raw/synsql/data/
     ;;
   data)
-    "$PY" -m phibench.sft --mix d1 --out finetune/data/d1
-    "$PY" -m phibench.sft --mix d2 --out finetune/data/d2 --synsql data/raw/synsql/data/train-00000-*.parquet
+    "$PY" -m phibench.sft --mix d1 --out finetune/data/d1 --max-tokens 8000
+    "$PY" -m phibench.sft --mix d2 --out finetune/data/d2 --max-tokens 8000 --synsql data/raw/synsql/data/train-00000-*.parquet
     ;;
   smoke)
     free_memory
-    "$PY" -m mlx_lm.lora -c "$CFG" --data finetune/data/d1 --adapter-path finetune/adapters/smoke \
+    # the 20 longest training examples: tests peak memory before a multi-hour run
+    "$PY" - <<'PYEOF'
+import json, pathlib
+src, dst = pathlib.Path("finetune/data/d1"), pathlib.Path("finetune/data/smoke")
+dst.mkdir(parents=True, exist_ok=True)
+rows = [json.loads(l) for l in open(src / "train.jsonl")]
+rows.sort(key=lambda r: -sum(len(m["content"]) for m in r["messages"]))
+(dst / "train.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows[:20]))
+(dst / "valid.jsonl").write_text("".join(list(open(src / "valid.jsonl"))[:4]))
+print("smoke data: longest example", sum(len(m["content"]) for m in rows[0]["messages"]), "chars")
+PYEOF
+    "$PY" -m mlx_lm.lora -c "$CFG" --data finetune/data/smoke --adapter-path finetune/adapters/smoke \
       --iters 20 --steps-per-report 5 --steps-per-eval 20 --val-batches 2 --save-every 20 2>&1 | tee runs/logs/lora_smoke.log
     RUNGS=b1_rules serve_and_eval smoke finetune/adapters/smoke "--limit 5 --tag smoke --no-ves"
     ;;

@@ -4,8 +4,8 @@ train: true
 fine_tune_type: lora
 mask_prompt: true            # loss on the SQL answer only
 num_layers: 16               # LoRA on the last 16 of 32 layers
-batch_size: 2
-grad_accumulation_steps: 4   # effective batch 8
+batch_size: 1                # one sequence at a time: Phi's 200k-token vocabulary makes logits large
+grad_accumulation_steps: 8   # effective batch 8
 iters: 400
 learning_rate: 1.0e-4
 lr_schedule:
@@ -16,7 +16,7 @@ lora_parameters:
   rank: 16
   dropout: 0.05
   scale: 2.0
-max_seq_length: 4096
+max_seq_length: 8192         # european_football_2 prompts are ~7k tokens
 grad_checkpoint: true        # trades speed for memory: needed on an 18 GB machine
 steps_per_report: 10
 steps_per_eval: 100
