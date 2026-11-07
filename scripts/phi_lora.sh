@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# Phase D: LoRA fine-tuning of Phi-4-mini with MLX, then evaluation through phibench. Free/local only.
+# Phase D: LoRA fine-tuning of Phi-4-mini, then evaluation through phibench. Free; no paid APIs.
 #
+# On an 8 GB Mac, MLX training only fits examples up to ~2k tokens (see `probe`), which drops most
+# BIRD schemas, so training runs on a free Kaggle GPU (finetune/kaggle_train.py, phi4mini_kaggle.ipynb):
+#   bash scripts/phi_lora.sh package          # build d1/d2 (8k-token limit) -> finetune/phi4mini-sft.zip
+#   ... upload the zip as a Kaggle dataset, run the notebook, download the .gguf files ...
+#   bash scripts/phi_lora.sh import d1 ~/Downloads/phi4mini-d1-Q4_K_M.gguf   # -> Ollama model phi4mini-d1
+#   bash scripts/phi_lora.sh evalo d1         # bird_val with b1_rules, b1_fs3 (same harness as Phase B)
+#
+# Local MLX steps (kept for machines with more memory):
 #   bash scripts/phi_lora.sh setup            # install mlx-lm, download one SynSQL-2.5M shard (~110 MB)
 #   bash scripts/phi_lora.sh data             # build finetune/data/{d1,d2}
 #   bash scripts/phi_lora.sh probe            # which example lengths / LoRA depths fit in this Mac's memory
@@ -110,9 +118,30 @@ PYEOF
     "$PY" -m mlx_lm lora -c "$CFG" --data "finetune/data/$mix" --adapter-path "finetune/adapters/$mix" \
       --iters "$iters" 2>&1 | tee "runs/logs/lora_${mix}.log"
     ;;
+  package)
+    "$PY" -m phibench.sft --mix d1 --out finetune/data/d1 --max-tokens 8000
+    "$PY" -m phibench.sft --mix d2 --out finetune/data/d2 --max-tokens 8000 --synsql data/raw/synsql/data/train-00000-*.parquet
+    rm -f finetune/phi4mini-sft.zip
+    (cd finetune/data && zip -qr ../phi4mini-sft.zip d1 d2 -x "*/stats.json")
+    zip -qj finetune/phi4mini-sft.zip finetune/kaggle_train.py
+    unzip -l finetune/phi4mini-sft.zip
+    ;;
+  import)
+    run=${2:?import: run name (base, d1, d2)}; gguf=${3:?path to the downloaded .gguf}
+    [ -f "$gguf" ] || { echo "no such file: $gguf"; exit 1; }
+    abs="$(cd "$(dirname "$gguf")" && pwd)/$(basename "$gguf")"
+    # same chat template, stop tokens and parameters as Ollama's phi4-mini; only the weights change
+    ollama show phi4-mini --modelfile | sed "s|^FROM .*|FROM $abs|" > "runs/logs/Modelfile.$run"
+    ollama create "phi4mini-$run" -f "runs/logs/Modelfile.$run"
+    ollama list | grep "phi4mini-$run"
+    ;;
+  evalo)
+    run=${2:?evalo: run name (base, d1, d2)}
+    "$PY" -m phibench.run --model "phi4mini-$run" --strategies "$RUNGS" --sets "$SETS" --workers 2
+    ;;
   eval)
     name=${2:?eval: base, d1 or d2}
     if [ "$name" = base ]; then serve_and_eval base ""; else serve_and_eval "$name" "finetune/adapters/$name"; fi
     ;;
-  *) sed -n '2,12p' "$0"; exit 1 ;;
+  *) sed -n '2,22p' "$0"; exit 1 ;;
 esac

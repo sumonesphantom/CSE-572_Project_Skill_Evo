@@ -21,3 +21,5 @@ runs/
 finetune/data/
 finetune/adapters/
 data/raw/synsql/
+finetune/phi4mini-sft.zip
+*.gguf
