@@ -34,6 +34,7 @@ from phibench.llm import Cache, ChatClient  # noqa: E402
 from phibench.metrics import error_type, ex_summary, gold_rows, rves_reward, soft_f1  # noqa: E402
 from phibench.parsing import extract_sql  # noqa: E402
 from phibench.repair import EMPTY_MESSAGE, error_message  # noqa: E402
+from phibench.values import empty_value_hints  # noqa: E402
 from phibench.strategies import STRATEGIES, build_messages  # noqa: E402
 
 EVAL_SETS = {  # name -> (dataset, split, max); spider_test = the same seeded 200 as config.yaml
@@ -104,6 +105,9 @@ class Bench:
                       else REPAIR_MSG.format(err=err))
             elif self.strat.retry_empty and not rows:
                 kind, fb = "empty", EMPTY_MESSAGE
+                if self.strat.value_hints:
+                    extra = empty_value_hints(task.db_path, sql)
+                    fb = EMPTY_MESSAGE + ("\n" + extra if extra else "")
             else:
                 break
             hist = hist + [{"role": "assistant", "content": reply}, {"role": "user", "content": fb}]

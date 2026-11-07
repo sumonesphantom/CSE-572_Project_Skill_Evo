@@ -8,6 +8,8 @@
 Every A strategy keeps one repair turn when the query raises an SQLite error.
 Phase B (each tested on bird_val against its A parent):
   b1_rules / b1_fs3   a3 / a4 + schema-aware repair (phibench.repair), up to 2 rounds, retry on empty
+  b2_fs3              b1_fs3 + value retrieval (phibench.values): exact stored spellings in the prompt
+                      and in the empty-result retry
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ from skillevo.solver import build_prompt as repo_prompt
 
 from .examples import format_demos
 from .schema import render
+from .values import value_hints
 
 GUIDELINES = """Guidelines:
 1. Select only the columns the question asks for, in the order it asks for them.
@@ -37,6 +40,7 @@ class Strategy:
     repair: str = "error"          # none | error (SQLite message only) | schema (B1: database-grounded hints)
     repair_rounds: int = 1         # max repair turns
     retry_empty: bool = False      # B1: also retry when the query runs but returns no rows
+    value_hints: bool = False      # B2: stored values matching the question, in the prompt and the empty retry
     max_tokens: int = 512
 
     def to_dict(self):
@@ -51,6 +55,9 @@ STRATEGIES = {s.name: s for s in [
     # B1: schema-aware repair, up to 2 rounds, plus a retry on empty results (on both tied A rungs)
     Strategy("b1_rules", schema="mschema", rules=True, repair="schema", repair_rounds=2, retry_empty=True),
     Strategy("b1_fs3", schema="mschema", rules=True, k_shots=3, repair="schema", repair_rounds=2, retry_empty=True),
+    # B2: value retrieval on top of the B1 winner
+    Strategy("b2_fs3", schema="mschema", rules=True, k_shots=3, repair="schema", repair_rounds=2, retry_empty=True,
+             value_hints=True),
 ]}
 
 
@@ -63,6 +70,10 @@ def build_messages(task, strat: Strategy, demos=()) -> list[dict]:
         parts.append("Solved examples from similar questions:\n\n" + format_demos(list(demos)))
     if strat.rules:
         parts.append(GUIDELINES)
+    if strat.value_hints:
+        hints = value_hints(task)
+        if hints:
+            parts.append(hints)
     if task.evidence:
         parts.append(f"External knowledge: {task.evidence}")
     parts.append(f"Question: {task.question}")

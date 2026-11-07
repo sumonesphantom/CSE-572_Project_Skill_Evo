@@ -267,3 +267,24 @@ def test_b1_stops_after_max_rounds(db):
     b, t = _repair_bench(db, "b1_rules", llm)
     r = b.solve(t)
     assert not r["correct"] and r["repair_kinds"] == ["error", "error"] and llm.calls == 3
+
+
+# ------------------------------------------------------------------ B2 value retrieval
+from phibench.values import ValueIndex, empty_value_hints, value_hints  # noqa: E402
+
+
+def test_value_hints_and_empty_retry(db):
+    t = task(db, 1, "How many staff work in Sales?", "SELECT 1", "bird")
+    assert "dept.name = 'sales'" in value_hints(t)
+    assert value_hints(task(db, 2, "how many staff are there?", "SELECT 1")) == ""   # nothing salient
+    msg = empty_value_hints(db, "SELECT * FROM dept WHERE name = 'Sales' AND id > '5'")
+    assert "'Sales' is not stored exactly" in msg and "dept.name = 'sales'" in msg
+    assert empty_value_hints(db, "SELECT * FROM dept WHERE name = 'sales'") == ""
+    assert ValueIndex(db).is_stored("hr") and not ValueIndex(db).is_stored("HR")
+
+
+def test_b2_prompt_has_values_before_question(db):
+    t = task(db, 1, "How many staff work in Sales?", "SELECT 1", "bird")
+    user = build_messages(t, STRATEGIES["b2_fs3"], [])[1]["content"]
+    assert user.index("Stored values that match") < user.index("Question:")
+    assert "Stored values" not in build_messages(t, STRATEGIES["b1_fs3"], [])[1]["content"]
