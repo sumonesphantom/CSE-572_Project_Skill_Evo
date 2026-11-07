@@ -1,0 +1,38 @@
+{
+  "n": 98,
+  "EX": 0.12244897959183673,
+  "valid_sql": 0.32653061224489793,
+  "by_difficulty": {
+    "challenging": 0.0,
+    "moderate": 0.167,
+    "simple": 0.129
+  },
+  "outcomes": {
+    "wrong column": 58,
+    "wrong result": 20,
+    "correct": 12,
+    "syntax": 6,
+    "other error": 1,
+    "wrong table": 1
+  },
+  "sec_per_q": 8.776428571428571,
+  "calls_per_q": 1.7244897959183674,
+  "variant": "compact",
+  "set": "val",
+  "model": "llama3.2:1b",
+  "config": {
+    "name": "compact",
+    "schema": "compact",
+    "prune": 4,
+    "descriptions": true,
+    "values": true,
+    "fewshot": 0,
+    "samples": 1,
+    "temperature": 0.8,
+    "repair": true,
+    "robust_extract": true,
+    "prompt": "improved",
+    "fast": true
+  },
+  "wall_secs": 218.7
+}

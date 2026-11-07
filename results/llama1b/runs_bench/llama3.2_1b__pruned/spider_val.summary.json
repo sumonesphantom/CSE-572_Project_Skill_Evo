@@ -1,0 +1,38 @@
+{
+  "n": 100,
+  "EX": 0.47,
+  "valid_sql": 0.73,
+  "by_difficulty": {
+    "challenging": 0.0,
+    "moderate": 0.29,
+    "simple": 0.623
+  },
+  "outcomes": {
+    "correct": 47,
+    "wrong result": 26,
+    "wrong column": 20,
+    "syntax": 3,
+    "other error": 3,
+    "wrong table": 1
+  },
+  "sec_per_q": 3.6782999999999992,
+  "calls_per_q": 1.33,
+  "variant": "pruned",
+  "set": "spider_val",
+  "model": "llama3.2:1b",
+  "config": {
+    "name": "pruned",
+    "schema": "pruned",
+    "prune": 4,
+    "descriptions": true,
+    "values": true,
+    "fewshot": 0,
+    "samples": 1,
+    "temperature": 0.8,
+    "repair": true,
+    "robust_extract": true,
+    "prompt": "improved",
+    "fast": true
+  },
+  "wall_secs": 20.2
+}

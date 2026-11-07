@@ -1,0 +1,37 @@
+{
+  "n": 155,
+  "EX": 0.04516129032258064,
+  "valid_sql": 0.44516129032258067,
+  "by_difficulty": {
+    "challenging": 0.0,
+    "moderate": 0.013,
+    "simple": 0.136
+  },
+  "outcomes": {
+    "wrong column": 62,
+    "wrong result": 62,
+    "syntax": 20,
+    "correct": 7,
+    "wrong table": 4
+  },
+  "sec_per_q": 26.548903225806452,
+  "calls_per_q": 5.593548387096774,
+  "variant": "sc5_nofs",
+  "set": "bird_test",
+  "model": "llama3.2-1b-sql",
+  "config": {
+    "name": "sc5_nofs",
+    "schema": "pruned",
+    "prune": 4,
+    "descriptions": true,
+    "values": true,
+    "fewshot": 0,
+    "samples": 5,
+    "temperature": 0.8,
+    "repair": true,
+    "robust_extract": true,
+    "prompt": "improved",
+    "fast": true
+  },
+  "wall_secs": 717.8
+}

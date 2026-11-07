@@ -1,0 +1,38 @@
+{
+  "n": 98,
+  "EX": 0.21428571428571427,
+  "valid_sql": 0.5816326530612245,
+  "by_difficulty": {
+    "challenging": 0.053,
+    "moderate": 0.188,
+    "simple": 0.355
+  },
+  "outcomes": {
+    "wrong result": 36,
+    "wrong column": 35,
+    "correct": 21,
+    "syntax": 4,
+    "other error": 1,
+    "wrong table": 1
+  },
+  "sec_per_q": 27.332755102040803,
+  "calls_per_q": 5.438775510204081,
+  "variant": "sc5_nofs",
+  "set": "val",
+  "model": "llama3.2:1b",
+  "config": {
+    "name": "sc5_nofs",
+    "schema": "pruned",
+    "prune": 4,
+    "descriptions": true,
+    "values": true,
+    "fewshot": 0,
+    "samples": 5,
+    "temperature": 0.8,
+    "repair": true,
+    "robust_extract": true,
+    "prompt": "improved",
+    "fast": true
+  },
+  "wall_secs": 516.7
+}

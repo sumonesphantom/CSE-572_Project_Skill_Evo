@@ -1,0 +1,37 @@
+{
+  "n": 100,
+  "EX": 0.39,
+  "valid_sql": 0.92,
+  "by_difficulty": {
+    "challenging": 0.375,
+    "moderate": 0.258,
+    "simple": 0.459
+  },
+  "outcomes": {
+    "wrong result": 53,
+    "correct": 39,
+    "wrong column": 4,
+    "wrong table": 3,
+    "syntax": 1
+  },
+  "sec_per_q": 20.150999999999996,
+  "calls_per_q": 5.08,
+  "variant": "sc5",
+  "set": "spider_val",
+  "model": "llama3.2:1b",
+  "config": {
+    "name": "sc5",
+    "schema": "pruned",
+    "prune": 4,
+    "descriptions": true,
+    "values": true,
+    "fewshot": 3,
+    "samples": 5,
+    "temperature": 0.8,
+    "repair": true,
+    "robust_extract": true,
+    "prompt": "improved",
+    "fast": true
+  },
+  "wall_secs": 405.9
+}

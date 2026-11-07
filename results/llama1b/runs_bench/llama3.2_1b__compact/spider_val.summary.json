@@ -1,0 +1,38 @@
+{
+  "n": 100,
+  "EX": 0.44,
+  "valid_sql": 0.67,
+  "by_difficulty": {
+    "challenging": 0.0,
+    "moderate": 0.226,
+    "simple": 0.607
+  },
+  "outcomes": {
+    "correct": 44,
+    "wrong column": 24,
+    "wrong result": 23,
+    "syntax": 4,
+    "other error": 4,
+    "wrong table": 1
+  },
+  "sec_per_q": 4.006200000000001,
+  "calls_per_q": 1.39,
+  "variant": "compact",
+  "set": "spider_val",
+  "model": "llama3.2:1b",
+  "config": {
+    "name": "compact",
+    "schema": "compact",
+    "prune": 4,
+    "descriptions": true,
+    "values": true,
+    "fewshot": 0,
+    "samples": 1,
+    "temperature": 0.8,
+    "repair": true,
+    "robust_extract": true,
+    "prompt": "improved",
+    "fast": true
+  },
+  "wall_secs": 102.2
+}

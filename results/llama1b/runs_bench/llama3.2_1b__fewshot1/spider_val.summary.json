@@ -1,0 +1,38 @@
+{
+  "n": 100,
+  "EX": 0.44,
+  "valid_sql": 0.84,
+  "by_difficulty": {
+    "challenging": 0.375,
+    "moderate": 0.258,
+    "simple": 0.541
+  },
+  "outcomes": {
+    "correct": 44,
+    "wrong result": 40,
+    "wrong column": 11,
+    "wrong table": 3,
+    "other error": 1,
+    "syntax": 1
+  },
+  "sec_per_q": 4.145000000000003,
+  "calls_per_q": 1.2,
+  "variant": "fewshot1",
+  "set": "spider_val",
+  "model": "llama3.2:1b",
+  "config": {
+    "name": "fewshot1",
+    "schema": "pruned",
+    "prune": 4,
+    "descriptions": true,
+    "values": true,
+    "fewshot": 1,
+    "samples": 1,
+    "temperature": 0.8,
+    "repair": true,
+    "robust_extract": true,
+    "prompt": "improved",
+    "fast": true
+  },
+  "wall_secs": 106.7
+}

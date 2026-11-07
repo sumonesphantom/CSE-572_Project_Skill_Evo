@@ -13,3 +13,9 @@ runs/
 *.log
 
 .DS_Store
+
+# Llama 1B benchmark (bench_llama/): local models, fine-tuning data and weights
+.venv-mlx/
+models/
+adapters/
+data/finetune/

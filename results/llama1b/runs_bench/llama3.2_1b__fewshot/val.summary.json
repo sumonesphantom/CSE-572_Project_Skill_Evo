@@ -1,0 +1,38 @@
+{
+  "n": 98,
+  "EX": 0.19387755102040816,
+  "valid_sql": 0.5612244897959183,
+  "by_difficulty": {
+    "challenging": 0.053,
+    "moderate": 0.188,
+    "simple": 0.29
+  },
+  "outcomes": {
+    "wrong result": 36,
+    "wrong column": 32,
+    "correct": 19,
+    "syntax": 6,
+    "other error": 3,
+    "wrong table": 2
+  },
+  "sec_per_q": 10.054387755102036,
+  "calls_per_q": 1.530612244897959,
+  "variant": "fewshot",
+  "set": "val",
+  "model": "llama3.2:1b",
+  "config": {
+    "name": "fewshot",
+    "schema": "pruned",
+    "prune": 4,
+    "descriptions": true,
+    "values": true,
+    "fewshot": 3,
+    "samples": 1,
+    "temperature": 0.8,
+    "repair": true,
+    "robust_extract": true,
+    "prompt": "improved",
+    "fast": true
+  },
+  "wall_secs": 250.3
+}

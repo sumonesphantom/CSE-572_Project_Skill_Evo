@@ -1,0 +1,38 @@
+{
+  "n": 98,
+  "EX": 0.09183673469387756,
+  "valid_sql": 0.35714285714285715,
+  "by_difficulty": {
+    "challenging": 0.0,
+    "moderate": 0.104,
+    "simple": 0.129
+  },
+  "outcomes": {
+    "wrong column": 54,
+    "wrong result": 26,
+    "correct": 9,
+    "syntax": 6,
+    "other error": 2,
+    "wrong table": 1
+  },
+  "sec_per_q": 9.26591836734694,
+  "calls_per_q": 1.7346938775510203,
+  "variant": "repo",
+  "set": "val",
+  "model": "llama3.2:1b",
+  "config": {
+    "name": "repo",
+    "schema": "repo",
+    "prune": 4,
+    "descriptions": true,
+    "values": true,
+    "fewshot": 0,
+    "samples": 1,
+    "temperature": 0.8,
+    "repair": true,
+    "robust_extract": false,
+    "prompt": "repo",
+    "fast": false
+  },
+  "wall_secs": 1.1
+}

@@ -1,0 +1,36 @@
+{
+  "n": 100,
+  "EX": 0.46,
+  "valid_sql": 0.78,
+  "by_difficulty": {
+    "challenging": 0.125,
+    "moderate": 0.355,
+    "simple": 0.557
+  },
+  "outcomes": {
+    "correct": 46,
+    "wrong result": 32,
+    "wrong column": 20,
+    "wrong table": 2
+  },
+  "sec_per_q": 13.683600000000006,
+  "calls_per_q": 5.23,
+  "variant": "sc5_nofs",
+  "set": "spider_val",
+  "model": "llama3.2-1b-sql",
+  "config": {
+    "name": "sc5_nofs",
+    "schema": "pruned",
+    "prune": 4,
+    "descriptions": true,
+    "values": true,
+    "fewshot": 0,
+    "samples": 5,
+    "temperature": 0.8,
+    "repair": true,
+    "robust_extract": true,
+    "prompt": "improved",
+    "fast": true
+  },
+  "wall_secs": 259.0
+}
