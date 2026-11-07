@@ -37,6 +37,8 @@ def load_runs(runs_dir: Path = RUNS) -> pd.DataFrame:
     for mf in sorted(runs_dir.glob("*/metrics.json")):
         d = json.loads(mf.read_text())
         meta = d["meta"]
+        if meta.get("limit"):  # smoke / partial runs are not results
+            continue
         for s, m in d["metrics"].items():
             if m:
                 rows.append({"run": mf.parent.name, "label": meta["label"], "strategy": meta["strategy"]["name"],
