@@ -253,6 +253,64 @@ def train(args, run: str, out: Path) -> dict:
     return log
 
 
+# ----------------------------------------------------------------------------- numerics check
+def diagnose(args):
+    """Validation loss of the untrained model on short examples under each compute setting, against
+    an fp32 CPU reference. A setting that is numerically fine matches the reference closely."""
+    import torch
+    import torch.nn.functional as F
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers.integrations import sdpa_attention
+
+    tok = AutoTokenizer.from_pretrained(args.base)
+    rows, _ = encode_all(tok, load_jsonl(find_data("d1", args.data_root)[1]), 1500)
+    rows = rows[: args.diag_n]
+    print(f"[diag] {len(rows)} validation examples of <= 1500 tokens", flush=True)
+    orig_gqa = sdpa_attention.use_gqa_in_sdpa
+
+    def loss_of(model, dev, dtype):
+        tot = n = 0
+        with torch.no_grad():
+            for ids, lab in rows:
+                x, y = torch.tensor([ids], device=dev), torch.tensor([lab], device=dev)
+                with torch.autocast(device_type=dev, dtype=dtype, enabled=dev == "cuda"):
+                    h = model.model(input_ids=x, use_cache=False).last_hidden_state
+                m = y[:, 1:] != -100
+                logits = model.lm_head(h[:, :-1][m].to(model.lm_head.weight.dtype)).float()
+                if not torch.isfinite(logits).all():
+                    return float("nan")
+                k = int(m.sum())
+                tot, n = tot + F.cross_entropy(logits, y[:, 1:][m]).item() * k, n + k
+        return tot / max(n, 1)
+
+    settings = [("fp32 CPU reference", "cpu", torch.float32, False)]
+    if torch.cuda.is_available():
+        settings += [("fp16 GPU, GQA patch (this run)", "cuda", torch.float16, True),
+                     ("fp16 GPU, no patch", "cuda", torch.float16, False),
+                     ("bf16 GPU, GQA patch", "cuda", torch.bfloat16, True),
+                     ("bf16 GPU, no patch", "cuda", torch.bfloat16, False)]
+    results = {}
+    for name, dev, dtype, patch in settings:
+        sdpa_attention.use_gqa_in_sdpa = (lambda *a, **k: False) if patch else orig_gqa
+        try:
+            model = AutoModelForCausalLM.from_pretrained(args.base, dtype=dtype, attn_implementation="sdpa",
+                                                         device_map={"": 0} if dev == "cuda" else "cpu").eval()
+            t0 = time.time()
+            results[name] = loss_of(model, dev, dtype)
+            print(f"[diag] {name:<34} val loss {results[name]:.4f}  ({time.time() - t0:.0f}s)", flush=True)
+        except Exception as e:  # noqa: BLE001 - report and continue with the next setting
+            results[name] = f"error: {type(e).__name__}: {str(e)[:120]}"
+            print(f"[diag] {name:<34} {results[name]}", flush=True)
+        model = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    sdpa_attention.use_gqa_in_sdpa = orig_gqa
+    Path(args.out).mkdir(parents=True, exist_ok=True)
+    (Path(args.out) / "diagnose.json").write_text(json.dumps(results, indent=1))
+    return results
+
+
 # ----------------------------------------------------------------------------- merge + GGUF
 def original_files(base: str) -> Path:
     """The base model's own non-weight files (config, tokenizer), as published."""
@@ -333,7 +391,12 @@ def main(argv=None):
     ap.add_argument("--4bit", dest="four_bit", action="store_true",
                     help="4-bit NF4 base (QLoRA). Default: fp16 base, which fits a 16 GB T4 and trains much faster")
     ap.add_argument("--no-gguf", dest="gguf", action="store_false", help="stop after training (+ merge)")
+    ap.add_argument("--diagnose", action="store_true", help="compare compute settings on short examples, then exit")
+    ap.add_argument("--diag-n", type=int, default=10)
     a = ap.parse_args(argv)
+    if a.diagnose:
+        diagnose(a)
+        return
     out_root, tmp = Path(a.out), Path(a.tmp)
     tmp.mkdir(parents=True, exist_ok=True)
     for run in a.runs.split(","):
