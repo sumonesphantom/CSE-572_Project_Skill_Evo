@@ -15,6 +15,11 @@ each change moves the agent in a **positive or negative** direction, and records
                                       Streamlit dashboard (runs/*)
 ```
 
+## Phi-4-mini benchmark (branch `srikar/phi4-mini-benchmark`)
+
+Prompting, LoRA fine-tuning and SkillEvo results for Phi-4-mini-instruct (3.8B) on BIRD mini-dev and Spider,
+with the `phibench/` harness: see [docs/PHI4_MINI_BENCHMARK.md](docs/PHI4_MINI_BENCHMARK.md).
+
 ## Setup
 
 ```bash
