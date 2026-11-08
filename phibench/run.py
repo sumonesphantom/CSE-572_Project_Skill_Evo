@@ -36,7 +36,7 @@ from phibench.metrics import error_type, ex_summary, gold_rows, rves_reward, sof
 from phibench.parsing import extract_sql  # noqa: E402
 from phibench.repair import EMPTY_MESSAGE, error_message  # noqa: E402
 from phibench.values import empty_value_hints  # noqa: E402
-from phibench.strategies import STRATEGIES, build_messages  # noqa: E402
+from phibench.strategies import STRATEGIES, Strategy, build_messages  # noqa: E402
 
 EVAL_SETS = {  # name -> (dataset, split, max); spider_test = the same seeded 200 as config.yaml
     "bird_val": ("bird", "val", None),
@@ -54,6 +54,13 @@ def eval_ids(splits: dict, name: str, seed: int = 0) -> list[str]:
     if mx and len(ids) > mx:  # same rule as skillevo.runner.Experiment._split
         ids = sorted(random.Random(seed).sample(ids, mx))
     return ids
+
+
+def _same_strategy(old: dict, new: dict) -> bool:
+    """Same settings, allowing options added after the run was made as long as they are at their
+    defaults (which leaves the prompt unchanged)."""
+    defaults = Strategy(name=new.get("name", "")).to_dict()
+    return all(old.get(k, defaults[k]) == v for k, v in new.items())
 
 
 def run_name(label: str, strategy: str, tag: str | None = None) -> str:
@@ -148,7 +155,8 @@ class Bench:
         if mf.exists():
             old = json.loads(mf.read_text())
             for k in ("model", "label", "backend", "num_ctx", "strategy"):
-                if old.get(k) != meta[k]:
+                same = (_same_strategy(old.get(k) or {}, meta[k]) if k == "strategy" else old.get(k) == meta[k])
+                if not same:
                     raise ValueError(f"{out_dir} was made with a different {k}: {old.get(k)} != {meta[k]}")
             meta["sets"] = sorted(set(old.get("sets", [])) | set(sets))
         else:

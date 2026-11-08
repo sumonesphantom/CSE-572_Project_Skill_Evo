@@ -372,3 +372,12 @@ def test_sft_build_mixes_dedupes_and_matches_eval_prompt(db):
     train3, _, st3 = sft.build("d2", tasks, splits, spider_train, synsql=[syn], counter=lambda e: 10)
     assert st3["train_synsql"] == 1 and "CREATE TABLE t" in syn["messages"][1]["content"]
     assert sft.synsql_example({"question": "", "schema": "x", "sql": "y"}) is None
+
+
+def test_resume_accepts_options_added_later_at_default():
+    from phibench.run import _same_strategy
+    new = STRATEGIES["b1_fs3"].to_dict()
+    old = {k: v for k, v in new.items() if k not in ("value_hints", "plan", "dealias_demos", "value_mode", "value_retry_only")}
+    assert _same_strategy(old, new)
+    assert not _same_strategy({**old, "k_shots": 5}, new)
+    assert not _same_strategy(old, STRATEGIES["b2_fs3"].to_dict() | {"name": "b1_fs3"})   # value_hints on
