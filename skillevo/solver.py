@@ -14,6 +14,14 @@ SYSTEM = (
 )
 
 
+def skill_db(skill: Skill) -> str | None:
+    """The database a skill is tied to (tag "db:<id>"), or None for a general skill."""
+    for t in skill.tags:
+        if isinstance(t, str) and t.startswith("db:"):
+            return t[3:]
+    return None
+
+
 @dataclass
 class Trajectory:
     task_id: str
@@ -44,16 +52,26 @@ def build_prompt(task, skills: list[Skill], schema: str) -> list[dict]:
 
 class Solver:
     def __init__(self, llm, top_k: int = 3, min_score: float = 0.5, repair: bool = True,
-                 sql_timeout: float = 30.0, schema_rows: int = 2):
+                 sql_timeout: float = 30.0, schema_rows: int = 2, db_skills: bool = False, max_db_skills: int = 2):
         self.llm = llm
         self.top_k = top_k
         self.min_score = min_score
         self.repair = repair
         self.sql_timeout = sql_timeout
         self.schema_rows = schema_rows
+        self.db_skills = db_skills          # fix C2: skills tagged "db:<id>" are offered to that database's tasks
+        self.max_db_skills = max_db_skills
 
     def select_skills(self, task, library: SkillLibrary) -> list[Skill]:
-        return retrieve(library.active(), task_query(task), self.top_k, self.min_score)
+        skills = library.active()
+        if not self.db_skills:
+            return retrieve(skills, task_query(task), self.top_k, self.min_score)
+        # C2: a database skill is always eligible for its own database (BM25 only orders them) and
+        # never shown for another database; general skills fill the rest by the usual BM25 rule.
+        scoped = [s for s in skills if skill_db(s) == task.db_id]
+        general = [s for s in skills if skill_db(s) is None]
+        picked = retrieve(scoped, task_query(task), min(self.max_db_skills, self.top_k), min_score=-1.0)
+        return picked + retrieve(general, task_query(task), self.top_k - len(picked), self.min_score)
 
     def solve(self, task, library: SkillLibrary | None = None, skills: list[Skill] | None = None) -> Trajectory:
         if skills is None:

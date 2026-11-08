@@ -65,14 +65,16 @@ class Experiment:
 
         cache = LLMCache(root / cfg["llm"]["cache"])
         host = cfg["llm"].get("host", "http://localhost:11434")
-        self.solver_llm = solver_llm or OllamaLLM(cfg["llm"]["solver"], host, cache, num_ctx=cfg["llm"].get("solver_ctx", 8192), max_tokens=512)
-        self.evolver_llm = evolver_llm or OllamaLLM(cfg["llm"]["evolver"], host, cache, num_ctx=cfg["llm"].get("evolver_ctx", 16384), max_tokens=2048)
+        self.solver_llm = solver_llm or OllamaLLM(cfg["llm"]["solver"], host, cache, num_ctx=cfg["llm"].get("solver_ctx", 8192), max_tokens=512, think=cfg["llm"].get("think", False))
+        self.evolver_llm = evolver_llm or OllamaLLM(cfg["llm"]["evolver"], host, cache, num_ctx=cfg["llm"].get("evolver_ctx", 16384), max_tokens=2048, think=cfg["llm"].get("think", False))
         sc = cfg["solver"]
-        self.solver = Solver(self.solver_llm, sc.get("top_k", 3), sc.get("min_score", 0.5), sc.get("repair", True), sc.get("sql_timeout", 30))
+        self.solver = Solver(self.solver_llm, sc.get("top_k", 3), sc.get("min_score", 0.5), sc.get("repair", True), sc.get("sql_timeout", 30),
+                             db_skills=sc.get("db_skills", False), max_db_skills=sc.get("max_db_skills", 2))
         ec = cfg["evolver"]
         allowed = ("create",) if arm == "append_only" else ("create", "update", "merge", "discard")
         self.evolver = Evolver(self.evolver_llm, ec.get("max_ops", 4), ec.get("n_fail", 10), ec.get("n_success", 3),
-                               ec.get("show_gold", True), show_stats=(arm == "guarded"), allowed_ops=allowed, seed=self.seed)
+                               ec.get("show_gold", True), show_stats=(arm == "guarded"), allowed_ops=allowed, seed=self.seed,
+                               show_rejections=ec.get("show_rejections", False), db_skills=ec.get("db_skills", False))
         self.monitor = Monitor(self.solver, self.tasks, self.val_ids, cfg["monitor"], seed=self.seed)
         # Audit monitor: re-tests each edit on held-out test tasks the gate never sees, so we can
         # measure whether validation verdicts generalise (verdict agreement / precision).
@@ -83,6 +85,7 @@ class Experiment:
         self.auditor = Monitor(self.solver, self.tasks, self.eval_sets[audit], cfg["monitor"], seed=self.seed + 1) if audit else None
         self.workers = cfg.get("workers", 2)
         self.library = SkillLibrary()
+        self.rejected: list[dict] = []   # edits the arm did not keep (shown to the evolver when show_rejections)
 
     def _split(self, splits, spec):
         """spec is 'bird:train' or {'split': 'spider:test', 'max': 200}."""
@@ -157,7 +160,7 @@ class Experiment:
             train_acc = sum(t["correct"] for t in trajs) / len(trajs)
             self.say(f"  round {r}: train acc {train_acc:.3f}; evolving ...")
 
-            ops, raw = self.evolver.propose(self.library, trajs, self.tasks, stats)
+            ops, raw = self.evolver.propose(self.library, trajs, self.tasks, stats, rejected=self.rejected[-12:])
             self.log.write("evolver", {"round": r, "n_ops": len(ops), "raw": raw})
 
             if self.arm == "guarded":  # monitor-initiated discards of skills proven harmful
@@ -189,6 +192,9 @@ class Experiment:
                        **({f"a_{k}": v for k, v in audit.to_dict().items()} if audit else {})}
                 self.log.write("edits", rec)
                 edits.append(rec)
+                if not accepted and op.get("source", "evolver") == "evolver":
+                    self.rejected.append({"summary": rec["summary"], "label": verdict.label, "gained": verdict.gained,
+                                          "lost": verdict.lost, "content": op.get("content", "")})
                 mark = "+" if verdict.label == "positive" else "-" if verdict.label == "negative" else "~"
                 self.say(f"    {eid} {rec['summary'][:60]:<60} {mark} {verdict.label:<8} net={verdict.net:+d} "
                          f"p={verdict.p_value:.2f} {'KEPT' if accepted else 'rejected'}")

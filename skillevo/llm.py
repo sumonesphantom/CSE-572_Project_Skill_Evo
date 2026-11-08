@@ -39,13 +39,14 @@ class LLMCache:
 class OllamaLLM:
     def __init__(self, model: str, host: str = "http://localhost:11434",
                  cache: LLMCache | None = None, num_ctx: int = 8192,
-                 max_tokens: int = 1024, timeout: int = 600):
+                 max_tokens: int = 1024, timeout: int = 600, think: bool | None = False):
         self.model = model
         self.host = host.rstrip("/")
         self.cache = cache
         self.num_ctx = num_ctx
         self.max_tokens = max_tokens
         self.timeout = timeout
+        self.think = think          # None: do not send Ollama's think flag at all
         self.calls = 0
         self.cache_hits = 0
 
@@ -64,10 +65,11 @@ class OllamaLLM:
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "think": False,
             "options": {"temperature": 0, "seed": 0, "num_ctx": self.num_ctx,
                         "num_predict": self.max_tokens},
         }
+        if self.think is not None:
+            payload["think"] = self.think
         for attempt in range(3):
             try:
                 r = requests.post(f"{self.host}/api/chat", json=payload, timeout=self.timeout)
