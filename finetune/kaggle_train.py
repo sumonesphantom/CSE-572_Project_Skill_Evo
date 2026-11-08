@@ -2,7 +2,7 @@
 
 Runs inside a Kaggle notebook (GPU T4 / P100, internet on). Free; no API keys.
 
-    python kaggle_train.py --runs base,d1,d2            # everything (base = D0 control, no training)
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python kaggle_train.py --runs base,d1,d2
     python kaggle_train.py --runs d1 --steps 400        # one adapter
 
 For each run it writes /kaggle/working/<run>/:
@@ -11,7 +11,8 @@ For each run it writes /kaggle/working/<run>/:
     phi4mini-<run>-Q4_K_M.gguf the merged model in the same quantisation as Ollama's phi4-mini
     DONE                       marker: a rerun skips finished runs
 
-Training matches the MLX config written for the Mac: LoRA rank 16 (alpha 32 = scale 2.0) on the
+Training matches the MLX config written for the Mac (except that the frozen base runs in fp16, not
+4-bit, which fits a 16 GB T4 and is several times faster there): LoRA rank 16 (alpha 32 = scale 2.0) on the
 last 16 of 32 layers, dropout 0.05, effective batch 8, lr 1e-4 cosine with 40 warmup steps, loss on
 the SQL answer only. Memory: Phi-4-mini's vocabulary has 200k tokens, so full-sequence logits for an
 8k-token prompt take several GB. The loss here runs the output layer only on answer positions.
@@ -74,31 +75,48 @@ def encode_all(tok, rows, max_len):
 
 
 # ----------------------------------------------------------------------------- model
+def avoid_gqa_sdpa():
+    """transformers passes enable_gqa=True to SDPA when there is no attention mask. PyTorch has no
+    memory-efficient kernel for that on a T4, so it falls back to the math kernel, which builds the
+    full heads x L x L score matrix (2.4 GB at 7k tokens). Repeating the KV heads instead keeps
+    SDPA on the memory-efficient kernel."""
+    try:
+        from transformers.integrations import sdpa_attention
+        if hasattr(sdpa_attention, "use_gqa_in_sdpa"):
+            sdpa_attention.use_gqa_in_sdpa = lambda *a, **k: False
+            return True
+    except ImportError:
+        pass
+    return False
+
+
 def load_model(base: str, four_bit: bool, n_lora_layers: int, rank: int):
     import torch
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    from peft import LoraConfig, get_peft_model
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
     cuda = torch.cuda.is_available()
-    bf16 = cuda and torch.cuda.is_bf16_supported()
+    bf16 = cuda and torch.cuda.get_device_capability()[0] >= 8      # T4 / P100: no bf16 -> fp16
     dtype = torch.bfloat16 if bf16 else (torch.float16 if cuda else torch.float32)
     kw = {"dtype": dtype, "attn_implementation": "sdpa"}
     if four_bit:
         kw["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
                                                        bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=dtype)
+    if cuda:
         kw["device_map"] = {"": 0}
     model = AutoModelForCausalLM.from_pretrained(base, **kw)
-    if four_bit:
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
-    else:
-        model.gradient_checkpointing_enable()
-        model.enable_input_require_grads()
-        if cuda:
-            model.to("cuda")
+    for p in model.parameters():
+        p.requires_grad_(False)
+    # Non-reentrant checkpointing needs no gradient on the inputs, so backward stops at the
+    # lowest LoRA layer instead of running through all 32 layers.
+    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     n_layers = model.config.num_hidden_layers
     cfg = LoraConfig(r=rank, lora_alpha=2 * rank, lora_dropout=0.05, target_modules=TARGETS, bias="none",
                      layers_to_transform=list(range(max(0, n_layers - n_lora_layers), n_layers)), task_type="CAUSAL_LM")
     model = get_peft_model(model, cfg)
+    for p in model.parameters():          # trainable LoRA weights in fp32 (GradScaler needs fp32 params)
+        if p.requires_grad:
+            p.data = p.data.float()
     model.config.use_cache = False
     return model, dtype
 
@@ -126,8 +144,10 @@ def train(args, run: str, out: Path) -> dict:
     train_rows, skipped = encode_all(tok, load_jsonl(tr_path), args.max_len)
     valid_rows, _ = encode_all(tok, load_jsonl(va_path)[: args.val_n], args.max_len)
     print(f"[{run}] {len(train_rows)} train examples ({skipped} skipped), {len(valid_rows)} valid", flush=True)
+    patched = avoid_gqa_sdpa()
     model, dtype = load_model(args.base, args.four_bit, args.lora_layers, args.rank)
     model.print_trainable_parameters()
+    print(f"[{run}] dtype {dtype}, 4-bit base: {args.four_bit}, GQA-SDPA patch: {patched}", flush=True)
     dev = next(p for p in model.parameters() if p.requires_grad).device
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=0.0)
@@ -135,6 +155,9 @@ def train(args, run: str, out: Path) -> dict:
     use_scaler = dtype == torch.float16
     scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
     amp = torch.autocast(device_type="cuda", dtype=dtype) if dev.type == "cuda" else torch.autocast("cpu", enabled=False)
+    if dev.type == "cuda":   # fail fast (in the step-0 validation pass) rather than fall back to the O(L^2) math kernel
+        from torch.nn.attention import SDPBackend, sdpa_kernel
+        sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]).__enter__()
 
     order, pos = list(range(len(train_rows))), 0
     random.shuffle(order)
@@ -185,6 +208,10 @@ def train(args, run: str, out: Path) -> dict:
         rec = {"step": step, "loss": sum(losses) / len(losses), "lr": sched.get_last_lr()[0],
                "tok_per_s": round(toks / (time.time() - t0), 1), "elapsed_min": round((time.time() - t0) / 60, 1)}
         log["steps"].append(rec)
+        if step == 5:
+            proj = (time.time() - t0) / 5 * args.steps / 3600
+            print(f"[{run}] projected training time for {args.steps} steps: {proj:.1f} h "
+                  f"(--max-hours {args.max_hours})", flush=True)
         if step % args.log_every == 0 or step == 1:
             print(f"[{run}] step {step}/{args.steps} loss {rec['loss']:.4f} lr {rec['lr']:.2e} "
                   f"{rec['tok_per_s']} tok/s {rec['elapsed_min']} min", flush=True)
@@ -284,7 +311,8 @@ def main(argv=None):
     ap.add_argument("--log-every", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-hours", type=float, default=9.5, help="stop training (and save) before Kaggle's 12 h limit")
-    ap.add_argument("--no-4bit", dest="four_bit", action="store_false", help="full-precision base (CPU tests)")
+    ap.add_argument("--4bit", dest="four_bit", action="store_true",
+                    help="4-bit NF4 base (QLoRA). Default: fp16 base, which fits a 16 GB T4 and trains much faster")
     ap.add_argument("--no-gguf", dest="gguf", action="store_false", help="stop after training (+ merge)")
     a = ap.parse_args(argv)
     out_root, tmp = Path(a.out), Path(a.tmp)
