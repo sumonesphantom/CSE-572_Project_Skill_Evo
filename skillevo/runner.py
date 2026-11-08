@@ -74,7 +74,8 @@ class Experiment:
         allowed = ("create",) if arm == "append_only" else ("create", "update", "merge", "discard")
         self.evolver = Evolver(self.evolver_llm, ec.get("max_ops", 4), ec.get("n_fail", 10), ec.get("n_success", 3),
                                ec.get("show_gold", True), show_stats=(arm == "guarded"), allowed_ops=allowed, seed=self.seed,
-                               show_rejections=ec.get("show_rejections", False), db_skills=ec.get("db_skills", False))
+                               show_rejections=ec.get("show_rejections", False), db_skills=ec.get("db_skills", False),
+                               enforce=ec.get("enforce", False))
         self.monitor = Monitor(self.solver, self.tasks, self.val_ids, cfg["monitor"], seed=self.seed)
         # Audit monitor: re-tests each edit on held-out test tasks the gate never sees, so we can
         # measure whether validation verdicts generalise (verdict agreement / precision).
@@ -161,7 +162,8 @@ class Experiment:
             self.say(f"  round {r}: train acc {train_acc:.3f}; evolving ...")
 
             ops, raw = self.evolver.propose(self.library, trajs, self.tasks, stats, rejected=self.rejected[-12:])
-            self.log.write("evolver", {"round": r, "n_ops": len(ops), "raw": raw})
+            self.log.write("evolver", {"round": r, "n_ops": len(ops), "raw": raw,
+                                       "filtered": getattr(self.evolver, "last_dropped", {})})
 
             if self.arm == "guarded":  # monitor-initiated discards of skills proven harmful
                 for sid, st in stats.items():

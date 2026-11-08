@@ -3,6 +3,7 @@
 # no-skill answers are reused by the monitor's baseline in the guarded arms).
 #   caffeinate -i bash scripts/phi_skillevo.sh            # all three arms (~10 h)
 #   bash scripts/phi_skillevo.sh guarded_fix               # one arm
+#   bash scripts/phi_skillevo.sh guarded_enforced          # last iteration: fixes enforced by the harness
 # A finished arm is skipped. An arm that stopped half way must be removed first (rm -r runs/<name>);
 # rerunning it is fast because every model answer is cached.
 set -uo pipefail
@@ -15,7 +16,8 @@ for a in "${ARMS[@]}"; do
     noskill)     arm=noskill; cfg=configs/phi/phi4mini__base.yaml ;;
     guarded)     arm=guarded; cfg=configs/phi/phi4mini__base.yaml ;;
     guarded_fix) arm=guarded; cfg=configs/phi/phi4mini__fix.yaml ;;
-    *) echo "unknown arm $a (noskill | guarded | guarded_fix)"; exit 1 ;;
+    guarded_enforced) arm=guarded; cfg=configs/phi/phi4mini__enforced.yaml ;;
+    *) echo "unknown arm $a (noskill | guarded | guarded_fix | guarded_enforced)"; exit 1 ;;
   esac
   name="phi4mini__$a"; dir="runs/$name"
   if [ -f "$dir/rounds.jsonl" ]; then
@@ -27,4 +29,4 @@ for a in "${ARMS[@]}"; do
   echo "=== $(date '+%F %T') $name" | tee -a runs/logs/phaseC.log
   "$PY" run.py --arm "$arm" --config "$cfg" --name "$name" 2>&1 | tee -a runs/logs/phaseC.log
 done
-"$PY" analyze.py runs/phi4mini__noskill runs/phi4mini__guarded runs/phi4mini__guarded_fix 2>&1 | tee -a runs/logs/phaseC.log
+"$PY" analyze.py $(ls -d runs/phi4mini__* 2>/dev/null) 2>&1 | tee -a runs/logs/phaseC.log

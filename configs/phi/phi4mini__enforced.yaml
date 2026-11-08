@@ -1,0 +1,52 @@
+# Phase C, Phi-4-mini as solver and evolver. Same budget as Venkat's Qwen SkillEvo profile
+# (4 rounds x 30 episodes, test sets scored at rounds 0 and 4, 20+10-question edit probes),
+# so the arms compare with his C01 run. Guarded arm with the Phase C fixes ENFORCED by the harness
+# (last SkillEvo iteration): repeats of rejected skills and non-SQLite functions are dropped, and a skill
+# whose SQL names tables of exactly one database is tagged to it (C2 without relying on the evolver).
+seed: 0
+rounds: 4
+batch_size: 30
+workers: 2
+eval_every: 4
+runs_dir: runs
+data:
+  task_files: [data/processed/bird.jsonl, data/processed/spider.jsonl]
+  splits_file: data/processed/splits.json
+  train: bird:train
+  val: bird:val
+  test:
+    bird_test: bird:test
+    spider_transfer: {split: spider:test, max: 200}
+llm:
+  host: http://localhost:11434
+  solver: phi4-mini
+  evolver: phi4-mini
+  think: null            # phi4-mini has no thinking mode: do not send Ollama's think flag
+  cache: data/cache/llm_cache.sqlite
+  solver_ctx: 8192
+  evolver_ctx: 16384
+solver:
+  top_k: 3
+  min_score: 0.5
+  repair: true
+  sql_timeout: 30
+  db_skills: true        # C2: skills tagged db:<id> are always offered to that database's questions
+  max_db_skills: 2
+evolver:
+  max_ops: 4
+  n_fail: 10
+  n_success: 3
+  show_gold: true
+  show_rejections: true  # C1: earlier rejected proposals and their verdicts go into the evolver prompt
+  db_skills: true        # C2: the evolver may tie a skill to one database
+  enforce: true          # harness applies C1/C2 and the SQLite check itself
+monitor:
+  probe_relevant: 20
+  probe_random: 10
+  min_net: 2
+  alpha: 0.05
+  min_uses: 5
+  loo: true
+  loo_max_tasks: 8
+  rollback_min_net: 3
+  audit_split: bird_test

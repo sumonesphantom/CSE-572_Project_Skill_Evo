@@ -8,8 +8,12 @@ monitor is shown too, so the evolver can target harmful or useless skills.
 """
 from __future__ import annotations
 
+import difflib
 import json
 import random
+import re
+import sqlite3
+from functools import lru_cache
 
 from .llm import extract_json
 
@@ -44,6 +48,50 @@ def _fmt_rejected(r: dict) -> str:
     return f"- {what} ({verdict})" + (f": {body[:160]}" if body else "")
 
 
+# ---------------------------------------------------------------- enforcement (Phase C, last iteration)
+NON_SQLITE = re.compile(r"\b(CONVERT|CONVERT_DATE|DATEDIFF|DATEADD|DATEPART|DATE_FORMAT|GETDATE|NOW|ISNULL|"
+                        r"YEAR|MONTH|DAY|CONCAT|IF|EXTRACT|TO_DATE|TO_CHAR|LEN|ILIKE|STR_TO_DATE)\s*\(|\bTOP\s+\d", re.I)
+_TABLE_REF = re.compile(r"\b(?:FROM|JOIN)\s+[`\"\[]?(\w+)|\b(\w+)\.[`\"\[]?\w+", re.I)
+
+
+@lru_cache(maxsize=256)
+def _db_tables(db_path: str) -> frozenset:
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            return frozenset(r[0].lower() for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'"))
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return frozenset()
+
+
+def infer_db(content: str, db_tables: dict[str, frozenset]) -> str | None:
+    """The one database whose tables cover every real table the skill's SQL names, else None."""
+    known = set().union(*db_tables.values()) if db_tables else set()
+    refs = {(a or b).lower() for a, b in _TABLE_REF.findall(content or "")} & known
+    if not refs:
+        return None
+    hits = [db for db, tables in db_tables.items() if refs <= tables]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def repeats_rejected(op: dict, rejected: list[dict], threshold: float = 0.8) -> bool:
+    name, content = _norm(op.get("name", "")), _norm(op.get("content", ""))
+    for r in rejected or []:
+        m = re.search(r"'(.*)'", r.get("summary", ""))
+        if name and m and _norm(m.group(1)) == name:
+            return True
+        rc = _norm(r.get("content", ""))
+        if content and rc and difflib.SequenceMatcher(None, content, rc).ratio() >= threshold:
+            return True
+    return False
+
+
 def _fmt_traj(task, traj, show_gold: bool, show_db: bool = False) -> str:
     lines = ([f"Database: {task.db_id}"] if show_db else []) + [f"Q: {task.question}"]
     if task.evidence:
@@ -60,7 +108,7 @@ class Evolver:
     def __init__(self, llm, max_ops: int = 4, n_fail: int = 10, n_success: int = 3,
                  show_gold: bool = True, show_stats: bool = False,
                  allowed_ops=("create", "update", "merge", "discard"), seed: int = 0,
-                 show_rejections: bool = False, db_skills: bool = False):
+                 show_rejections: bool = False, db_skills: bool = False, enforce: bool = False):
         self.llm = llm
         self.max_ops = max_ops
         self.n_fail = n_fail
@@ -71,6 +119,8 @@ class Evolver:
         self.rng = random.Random(seed)
         self.show_rejections = show_rejections   # fix C1: show earlier rejected proposals and their verdicts
         self.db_skills = db_skills               # fix C2: allow skills tied to one database
+        self.enforce = enforce                   # harness applies C1/C2 itself + drops non-SQLite skills
+        self.last_dropped: dict = {}
 
     def build_messages(self, library, trajs, tasks, skill_stats=None, rejected=None):
         fails = [t for t in trajs if not t["correct"]]
@@ -113,7 +163,20 @@ class Evolver:
             return [], raw
         if isinstance(ops, dict):
             ops = ops.get("operations", [ops])
-        ops = [o for o in (validate_op(o, library, self.allowed_ops) for o in ops) if o][: self.max_ops]
+        n_written = len(ops) if isinstance(ops, list) else 0
+        ops = [o for o in (validate_op(o, library, self.allowed_ops) for o in ops) if o]
+        self.last_dropped = {"written": n_written, "invalid": n_written - len(ops)}
+        if self.enforce:
+            kept = []
+            for o in ops:
+                if o["op"] != "discard" and NON_SQLITE.search(o.get("content") or ""):
+                    self.last_dropped["non_sqlite"] = self.last_dropped.get("non_sqlite", 0) + 1
+                elif o["op"] == "create" and repeats_rejected(o, rejected):
+                    self.last_dropped["repeat"] = self.last_dropped.get("repeat", 0) + 1
+                else:
+                    kept.append(o)
+            ops = kept
+        ops = ops[: self.max_ops]
         dbs = {t.db_id for t in tasks.values()}
         for o in ops:
             db = o.pop("db", None)
@@ -121,6 +184,15 @@ class Evolver:
                 o["tags"] = [t for t in o["tags"] if not t.startswith("db:")] + [f"db:{db}"]
             elif not self.db_skills:
                 o["tags"] = [t for t in o["tags"] if not t.startswith("db:")]
+        if self.enforce and self.db_skills:   # tag by the tables the skill's SQL names, if they pin one database
+            batch_ds = {tasks[t["task_id"]].dataset for t in trajs}
+            db_tables = {t.db_id: _db_tables(t.db_path) for t in tasks.values() if t.dataset in batch_ds}
+            for o in ops:
+                if o["op"] in ("create", "merge") and not any(t.startswith("db:") for t in o["tags"]):
+                    db = infer_db(o.get("content", ""), db_tables)
+                    if db:
+                        o["tags"] = o["tags"] + [f"db:{db}"]
+                        self.last_dropped["auto_db"] = self.last_dropped.get("auto_db", 0) + 1
         return ops, raw
 
 

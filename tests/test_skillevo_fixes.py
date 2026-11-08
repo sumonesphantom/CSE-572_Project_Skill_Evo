@@ -104,3 +104,47 @@ def test_think_flag_optional(monkeypatch):
     llm_mod.OllamaLLM("m").chat([{"role": "user", "content": "a"}])
     llm_mod.OllamaLLM("m", think=None).chat([{"role": "user", "content": "b"}])
     assert sent[0]["think"] is False and "think" not in sent[1]
+
+
+# ------------------------------------------------------------------ enforced fixes (last Phase C arm)
+import sqlite3  # noqa: E402
+
+from skillevo.evolver import NON_SQLITE, infer_db, repeats_rejected  # noqa: E402
+
+
+def test_enforcement_helpers():
+    tables = {"formula_1": frozenset({"drivers", "qualifying", "races"}), "card_games": frozenset({"cards", "sets"}),
+              "other": frozenset({"races", "teams"})}
+    assert infer_db("SELECT T1.driverRef FROM qualifying AS T1 JOIN drivers ON ...", tables) == "formula_1"
+    assert infer_db("SELECT * FROM races", tables) is None            # 'races' is in two databases
+    assert infer_db("CAST(x AS REAL) / y", tables) is None             # no table at all: general skill
+    assert NON_SQLITE.search("CONVERT_DATE(d, '%Y')") and NON_SQLITE.search("SELECT TOP 5 x")
+    assert not NON_SQLITE.search("strftime('%Y', d) || CAST(x AS REAL)")
+    rej = [{"summary": "create 'handle_date_formatting'", "content": "use strftime on text dates"}]
+    assert repeats_rejected({"name": "Handle Date Formatting", "content": "other"}, rej)
+    assert repeats_rejected({"name": "new", "content": "use strftime on text dates!"}, rej)
+    assert not repeats_rejected({"name": "ratio", "content": "CAST numerator AS REAL"}, rej)
+
+
+def test_enforced_propose_filters_and_tags(tmp_path):
+    db = tmp_path / "f1.sqlite"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE qualifying (driverId INT, q1 TEXT)")
+    c.commit()
+    c.close()
+    tasks = {"t1": Task("t1", "bird", "formula_1", str(db), "q?", "", "SELECT 1")}
+    trajs = [{"task_id": "t1", "skills": [], "sql": "SELECT 0", "correct": False, "error": None}]
+    reply = json.dumps([
+        {"op": "create", "name": "dates", "content": "CONVERT_DATE(x)"},
+        {"op": "create", "name": "handle_date_formatting", "content": "strftime"},
+        {"op": "create", "name": "q1 times", "content": "SELECT driverId FROM qualifying WHERE q1 IS NOT NULL"},
+        {"op": "create", "name": "ratio", "content": "CAST(a AS REAL) / b"},
+        {"op": "update", "skill_id": "S999", "content": "x"}])
+    rej = [{"summary": "create 'handle_date_formatting'", "content": "earlier"}]
+    ev = Evolver(CaptureEvolver(reply), db_skills=True, show_rejections=True, enforce=True)
+    ops, _ = ev.propose(SkillLibrary(), trajs, tasks, rejected=rej)
+    assert [o["name"] for o in ops] == ["q1 times", "ratio"]
+    assert ops[0]["tags"] == ["db:formula_1"] and ops[1]["tags"] == []
+    assert ev.last_dropped == {"written": 5, "invalid": 1, "non_sqlite": 1, "repeat": 1, "auto_db": 1}
+    ops2, _ = Evolver(CaptureEvolver(reply), db_skills=True).propose(SkillLibrary(), trajs, tasks, rejected=rej)
+    assert len(ops2) == 4 and all(o["tags"] == [] for o in ops2)       # enforcement off: nothing filtered or tagged
