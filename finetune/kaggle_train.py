@@ -90,6 +90,23 @@ def avoid_gqa_sdpa():
     return False
 
 
+def skip_old_torchao():
+    """Kaggle ships torchao 0.10; peft raises when it finds any torchao older than 0.16, even though
+    nothing here uses torchao. Tell peft it is absent so LoRA uses its plain Linear layers."""
+    import peft.import_utils as iu
+    try:
+        iu.is_torchao_available()
+        return False
+    except ImportError:
+        iu.is_torchao_available = lambda *a, **k: False
+        try:
+            import peft.tuners.lora.torchao as lt
+            lt.is_torchao_available = iu.is_torchao_available
+        except ImportError:
+            pass
+        return True
+
+
 def load_model(base: str, four_bit: bool, n_lora_layers: int, rank: int):
     import torch
     from peft import LoraConfig, get_peft_model
@@ -113,6 +130,7 @@ def load_model(base: str, four_bit: bool, n_lora_layers: int, rank: int):
     n_layers = model.config.num_hidden_layers
     cfg = LoraConfig(r=rank, lora_alpha=2 * rank, lora_dropout=0.05, target_modules=TARGETS, bias="none",
                      layers_to_transform=list(range(max(0, n_layers - n_lora_layers), n_layers)), task_type="CAUSAL_LM")
+    skip_old_torchao()
     model = get_peft_model(model, cfg)
     for p in model.parameters():          # trainable LoRA weights in fp32 (GradScaler needs fp32 params)
         if p.requires_grad:
@@ -254,6 +272,7 @@ def merge(base: str, adapter: Path | None, dst: Path):
     from transformers import AutoModelForCausalLM
     model = AutoModelForCausalLM.from_pretrained(base, dtype=torch.float16, device_map="cpu")
     if adapter is not None:
+        skip_old_torchao()
         model = PeftModel.from_pretrained(model, str(adapter)).merge_and_unload()
     model.save_pretrained(dst, safe_serialization=True)
     del model
