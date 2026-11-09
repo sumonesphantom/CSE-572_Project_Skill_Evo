@@ -1,0 +1,25 @@
+{
+  "model": "gemma4:e2b-it-q4_K_M",
+  "strategy": {
+    "name": "sm_pruned_fs3",
+    "schema": "compact",
+    "rules": false,
+    "k_shots": 3,
+    "cot": false,
+    "n_samples": 1,
+    "temperature": 0.7,
+    "max_tokens": 512,
+    "extract": "robust",
+    "prune": 4
+  },
+  "rung": "S6",
+  "library": null,
+  "sets": [
+    "bird_val",
+    "bird_test",
+    "spider_test"
+  ],
+  "repair": true,
+  "top_k": 3,
+  "limit": null
+}
